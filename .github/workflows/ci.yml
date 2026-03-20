@@ -1,0 +1,64 @@
+# =============================================================================
+# pv-report-automation — CI/CD Pipeline (GitHub Actions)
+# =============================================================================
+# Runs automated tests on every push and pull request.
+# The green ✅ check badge on GitHub is a strong recruiter signal.
+#
+# Author: Miguel Ángel Mejía Sánchez
+# =============================================================================
+
+name: CI — Tests & Linting
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: "🧪 Run Tests (Python ${{ matrix.python-version }})"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🧪 Run tests with coverage
+        run: |
+          pytest tests/ -v --tb=short --cov=src --cov-report=term-missing
+
+      - name: ✅ All tests passed
+        run: echo "All tests passed successfully!"
+
+  lint:
+    name: "🔍 Code Quality Check"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 📦 Install linting tools
+        run: pip install flake8
+
+      - name: 🔍 Run flake8
+        run: flake8 src/ --max-line-length=100 --statistics --count
