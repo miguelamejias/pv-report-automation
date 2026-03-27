@@ -129,7 +129,12 @@ class SolarDataTransformer:
     # ------------------------------------------------------------------
 
     def _validate_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Ensure all required columns are present in the raw data."""
+        """Ensure all required columns are present in the raw data.
+
+        Required: timestamp, v_dc_string_1, v_dc_string_2, i_dc_total,
+                  p_ac_output, temp_heatsink, irradiance_poa, status_code.
+        Optional: v_dc_string_3, v_dc_string_4 (multi-string plants).
+        """
         required = {
             "timestamp",
             "v_dc_string_1",
@@ -173,6 +178,10 @@ class SolarDataTransformer:
             "temp_heatsink",
             "irradiance_poa",
         ]
+        # Include optional multi-string columns if present
+        for optional_col in ["v_dc_string_3", "v_dc_string_4"]:
+            if optional_col in df.columns:
+                numeric_cols.append(optional_col)
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
@@ -211,7 +220,11 @@ class SolarDataTransformer:
         df = df.copy()
 
         # ΔV between strings — key indicator for isolation faults
-        v_avg = (df["v_dc_string_1"] + df["v_dc_string_2"]) / 2
+        # Use all available string voltages for a robust average
+        string_cols = [c for c in ["v_dc_string_1", "v_dc_string_2",
+                                    "v_dc_string_3", "v_dc_string_4"]
+                       if c in df.columns]
+        v_avg = df[string_cols].mean(axis=1)
         df["delta_v_dc_pct"] = (
             (df["v_dc_string_1"] - df["v_dc_string_2"]).abs()
             / v_avg.replace(0, np.nan)

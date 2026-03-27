@@ -192,17 +192,25 @@ class ReportGenerator:
 
         summary = self.compute_summary(df)
 
+        has_extra_strings = (
+            "v_dc_string_3" in df.columns and "v_dc_string_4" in df.columns
+        )
+        n_rows = 5 if has_extra_strings else 4
+        subplot_titles = [
+            "AC Power Output & Solar Irradiance",
+            "Performance Ratio (Daily Average)",
+            "DC String Voltages (ΔV Detection)",
+            "Heatsink Temperature",
+        ]
+        if has_extra_strings:
+            subplot_titles.append("Panel Group Failure Evolution — String Voltage Over Time")
+
         fig = make_subplots(
-            rows=4,
+            rows=n_rows,
             cols=1,
             shared_xaxes=True,
-            vertical_spacing=0.06,
-            subplot_titles=(
-                "AC Power Output & Solar Irradiance",
-                "Performance Ratio (Daily Average)",
-                "DC String Voltages (ΔV Detection)",
-                "Heatsink Temperature",
-            ),
+            vertical_spacing=0.05,
+            subplot_titles=tuple(subplot_titles),
         )
 
         # -- Chart 1: Power vs Irradiance (dual axis) --
@@ -302,6 +310,80 @@ class ReportGenerator:
             col=1,
         )
 
+        # -- Chart 5: Panel Group Failure Evolution (new) --
+        if has_extra_strings:
+            colors = {
+                "v_dc_string_1": ("String 1 (ref)", "#3498DB"),
+                "v_dc_string_2": ("String 2 (ref)", "#1ABC9C"),
+                "v_dc_string_3": ("String 3 — FALLA", "#E74C3C"),
+                "v_dc_string_4": ("String 4 (ref)", "#9B59B6"),
+            }
+            for col_name, (label, color) in colors.items():
+                is_fault = col_name == "v_dc_string_3"
+                fig.add_trace(
+                    go.Scatter(
+                        x=df["timestamp"],
+                        y=df[col_name],
+                        name=label,
+                        line=dict(
+                            color=color,
+                            width=2.5 if is_fault else 1.5,
+                            dash="solid" if is_fault else "dot",
+                        ),
+                        opacity=1.0 if is_fault else 0.6,
+                        legendgroup="panel_evolution",
+                    ),
+                    row=5,
+                    col=1,
+                )
+
+            # Shade the fault window (from first degradation to end)
+            # String 3 starts degrading from day 4 afternoon (day index 3)
+            # Find timestamps where String 3 deviates significantly from reference
+            ref_avg = df[["v_dc_string_1", "v_dc_string_2", "v_dc_string_4"]].mean(axis=1)
+            fault_mask = (df["v_dc_string_3"] < ref_avg * 0.95) & (ref_avg > 50)
+            if fault_mask.any():
+                fault_start = df.loc[fault_mask, "timestamp"].iloc[0]
+                fault_end = df.loc[fault_mask, "timestamp"].iloc[-1]
+
+                # Shade fault zone
+                fig.add_vrect(
+                    x0=fault_start,
+                    x1=fault_end,
+                    fillcolor="rgba(231, 76, 60, 0.08)",
+                    line_width=0,
+                    row=5,
+                    col=1,
+                )
+
+                # Find the first critical fault point (>20% drop)
+                critical_mask = (df["v_dc_string_3"] < ref_avg * 0.80) & (ref_avg > 50)
+                if critical_mask.any():
+                    critical_ts = df.loc[critical_mask, "timestamp"].iloc[0]
+                    critical_v = df.loc[critical_mask, "v_dc_string_3"].iloc[0]
+                    fig.add_annotation(
+                        x=critical_ts,
+                        y=critical_v,
+                        text="⚠ Falla >20%",
+                        showarrow=True,
+                        arrowhead=2,
+                        arrowcolor="#E74C3C",
+                        font=dict(color="#E74C3C", size=11),
+                        bgcolor="rgba(231,76,60,0.15)",
+                        row=5,
+                        col=1,
+                    )
+
+            # Horizontal reference line at nominal voltage
+            fig.add_hline(
+                y=380,
+                line_dash="dash",
+                line_color="#95A5A6",
+                annotation_text="V nominal: 380 V",
+                row=5,
+                col=1,
+            )
+
         # Layout styling
         fig.update_layout(
             title=dict(
@@ -313,7 +395,7 @@ class ReportGenerator:
                 ),
                 font=dict(size=16),
             ),
-            height=1200,
+            height=1600 if has_extra_strings else 1200,
             template="plotly_dark",
             showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=-0.05),

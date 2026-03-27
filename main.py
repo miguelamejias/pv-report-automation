@@ -28,6 +28,12 @@ import logging
 import sys
 from pathlib import Path
 
+# Force UTF-8 encoding for standard output/error to display emojis correctly on Windows
+if sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+if sys.stderr.encoding.lower() != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8')
+
 from src import __version__
 from src.transformer import SolarDataTransformer
 from src.anomaly_engine import (

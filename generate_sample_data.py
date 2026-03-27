@@ -10,6 +10,7 @@ temperature patterns, and three types of injected anomalies:
   1. Soiling (gradual PR degradation over days 3-7)
   2. Clipping (flat power at high irradiance on day 4)
   3. Isolation fault (string voltage mismatch on day 6)
+  4. Panel group failure (progressive String 3 degradation: day 4 onset → critical by day 6-7)
 
 This script is NOT part of the production code — it generates the
 sample_data/plant_log_2024.csv file used for demos and testing.
@@ -45,6 +46,7 @@ BASE_I_DC_MAX = 14.0
 SOILING_START_DAY = 2    # Days 3-7: gradual PR drop
 CLIPPING_DAY = 3         # Day 4: power caps at high irradiance
 ISOLATION_FAULT_DAY = 5  # Day 6: string voltage mismatch
+PANEL_FAULT_START_DAY = 3  # Day 4: String 3 panel group begins degrading
 
 random.seed(42)  # Reproducibility
 
@@ -92,6 +94,8 @@ def generate_row(ts: datetime, day: int, hour: float) -> dict:
     # DC voltages (strings)
     v_dc_1 = BASE_V_DC + random.gauss(0, 2.0) if irr > 20 else random.uniform(0, 5)
     v_dc_2 = BASE_V_DC + random.gauss(0, 2.0) if irr > 20 else random.uniform(0, 5)
+    v_dc_3 = BASE_V_DC + random.gauss(0, 2.0) if irr > 20 else random.uniform(0, 5)
+    v_dc_4 = BASE_V_DC + random.gauss(0, 2.0) if irr > 20 else random.uniform(0, 5)
 
     # DC current proportional to irradiance
     i_dc = (irr / 1000) * BASE_I_DC_MAX + random.gauss(0, 0.3) if irr > 20 else 0
@@ -120,6 +124,24 @@ def generate_row(ts: datetime, day: int, hour: float) -> dict:
         v_dc_2 *= 0.72  # 28% drop → ΔV > 15%
         status = "0x05"  # Isolation fault code
 
+    # 4. Panel group failure: String 3 degrades progressively (bypass diode failure + partial shading)
+    #    Day 4 (onset): mild voltage sag during peak hours only
+    #    Day 5 (progression): moderate drop, visible even outside peak
+    #    Day 6-7 (critical): severe sustained voltage loss, string nearly offline
+    if day >= PANEL_FAULT_START_DAY and irr > 50:
+        days_since_onset = day - PANEL_FAULT_START_DAY  # 0, 1, 2, 3
+        # Progressive degradation factor: 3% → 10% → 22% → 34% drop
+        fault_severity = [0.03, 0.10, 0.22, 0.34][min(days_since_onset, 3)]
+        # On early days, only afternoon hours are affected (hot-spot developing)
+        if days_since_onset < 2:
+            if 12.0 <= hour <= 17.0:
+                v_dc_3 *= (1.0 - fault_severity)
+        else:
+            # Days 6-7: all daylight hours severely impacted
+            v_dc_3 *= (1.0 - fault_severity)
+            if days_since_onset >= 2:
+                status = "0x04" if status == "0x00" else status  # Overtemperature code (hot-spot)
+
     # Random hardware errors (~1% chance)
     if random.random() < 0.01 and irr > 100:
         status = random.choice(["0x01", "0x02", "0x04", "0x07"])
@@ -128,6 +150,8 @@ def generate_row(ts: datetime, day: int, hour: float) -> dict:
         "timestamp": ts.isoformat(),
         "v_dc_string_1": round(v_dc_1, 2),
         "v_dc_string_2": round(v_dc_2, 2),
+        "v_dc_string_3": round(max(0, v_dc_3), 2),
+        "v_dc_string_4": round(v_dc_4, 2),
         "i_dc_total": round(max(0, i_dc), 2),
         "p_ac_output": round(max(0, p_ac), 1),
         "temp_heatsink": round(temp, 1),
@@ -144,6 +168,8 @@ def main():
         "timestamp",
         "v_dc_string_1",
         "v_dc_string_2",
+        "v_dc_string_3",
+        "v_dc_string_4",
         "i_dc_total",
         "p_ac_output",
         "temp_heatsink",
@@ -179,6 +205,7 @@ def main():
     print(f"     - Soiling: days {SOILING_START_DAY + 1}-{DAYS}")
     print(f"     - Clipping: day {CLIPPING_DAY + 1}")
     print(f"     - Isolation fault: day {ISOLATION_FAULT_DAY + 1}")
+    print(f"     - Panel group failure (String 3): day {PANEL_FAULT_START_DAY + 1} onset → critical day {ISOLATION_FAULT_DAY + 1}-{DAYS}")
 
 
 if __name__ == "__main__":
