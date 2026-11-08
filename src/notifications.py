@@ -380,6 +380,171 @@ class NotificationOrchestrator:
         </html>"""
 
     # ------------------------------------------------------------------
+    # Closed-Loop Incident Alert Email (v3.0 NOC)
+    # ------------------------------------------------------------------
+
+    def _build_incident_subject(self, incident_id: str, alerts: list[Alert]) -> str:
+        """Build subject with unique [INC-XXXX] tag for reply tracking."""
+        primary = alerts[0] if alerts else None
+        panel_id = primary.details.get("panel_id", "PNL-B04-12") if primary else "PNL-B04-12"
+        return (
+            f"🔴 [ALERTA CRÍTICA] [{incident_id}] Falla en Panel {panel_id} "
+            f"— Acción Técnica Requerida"
+        )
+
+    def _build_incident_email_html(
+        self,
+        alerts: list[Alert],
+        incident_id: str,
+        technician_name: str,
+        supervisor_name: str = "Ing. Miguel Ángel Mejía Sánchez",
+    ) -> str:
+        """Build rich HTML work order email instructing technician to prepare tools & contact supervisor."""
+        primary = alerts[0] if alerts else None
+        details = primary.details if primary else {}
+        panel_id = details.get("panel_id", "PNL-B04-12")
+        location_block = details.get("location_block", "Bloque B - Fila 4 - Posicion 12")
+        lat = details.get("latitude", 4.9186)
+        lon = details.get("longitude", -73.9982)
+        diag_msg = primary.message if primary else "Anomalía crítica detectada en string fotovoltaico."
+
+        return f"""
+        <html>
+        <body style="font-family: 'Segoe UI', Arial, sans-serif; color: #2C3E50; padding: 20px; background-color: #F8F9FA;">
+            <div style="max-width: 680px; margin: auto; background: #FFFFFF; border-radius: 8px; border-top: 6px solid #E74C3C; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                <h2 style="color: #E74C3C; margin-top: 0;">🚨 ORDEN DE EMERGENCIA EN PLANTA SOLAR — [{incident_id}]</h2>
+                <p>Hola <strong>{technician_name}</strong>,</p>
+                <p>El Centro de Operaciones de Red (NOC) de <strong>ENERTEC LATINOAMÉRICA</strong> te ha asignado un incidente crítico detectado en tiempo real:</p>
+
+                <table style="width: 100%; border-collapse: collapse; margin: 16px 0; background: #FDF2E9; border-radius: 6px;">
+                    <tr>
+                        <td style="padding: 10px; font-weight: bold; width: 38%;">ID de Incidente:</td>
+                        <td style="padding: 10px;"><code>{incident_id}</code></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; font-weight: bold;">Panel / String Afectado:</td>
+                        <td style="padding: 10px;"><strong>{panel_id}</strong></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; font-weight: bold;">Ubicación Física:</td>
+                        <td style="padding: 10px;"><strong>{location_block}</strong> (GPS: {lat}, {lon})</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; font-weight: bold;">Diagnóstico Técnico:</td>
+                        <td style="padding: 10px;">{diag_msg}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; font-weight: bold;">Supervisor en Turno:</td>
+                        <td style="padding: 10px;"><strong>{supervisor_name}</strong></td>
+                    </tr>
+                </table>
+
+                <h3 style="color: #2C3E50;">🛠️ Instrucciones Obligatorias antes de Intervenir:</h3>
+                <ol style="line-height: 1.6;">
+                    <li><strong>Preparar equipos y EPP:</strong> Alistar multímetro DC 1000V, pinza amperimétrica, cámara termográfica, conectores MC4 de repuesto y equipo de protección dieléctrico.</li>
+                    <li><strong>Hablar con tu supervisor:</strong> Reportarse inmediatamente con <strong>{supervisor_name}</strong> para validar el bloqueo/etiquetado (LOTO) antes de intervenir el arreglo en <em>{location_block}</em>.</li>
+                    <li><strong>Confirmar cierre por correo:</strong> Una vez atendida la emergencia y restablecido el panel, <strong>RESPONDE DIRECTAMENTE A ESTE CORREO ("Responder / Reply")</strong> indicando las acciones realizadas para que la plataforma normalice el estado automáticamente.</li>
+                </ol>
+
+                <p style="font-size: 12px; color: #7F8C8D; margin-top: 24px; border-top: 1px solid #EAECEE; padding-top: 12px;">
+                    Se adjunta Orden de Trabajo ejecutiva en PDF.<br>
+                    Generado por <strong>pv-report-automation v3.0 NOC</strong> | ENERTEC LATINOAMÉRICA
+                </p>
+            </div>
+        </body>
+        </html>"""
+
+    def send_incident_alert(
+        self,
+        alerts: list[Alert],
+        incident_id: str,
+        technician_name: str,
+        technician_email: str,
+        supervisor_name: str = "Ing. Miguel Ángel Mejía Sánchez",
+        pdf_path: Optional[str | Path] = None,
+    ) -> dict:
+        """Send an incident work-order email to the registered on-duty technician."""
+        subject = self._build_incident_subject(incident_id, alerts)
+        html_body = self._build_incident_email_html(
+            alerts=alerts,
+            incident_id=incident_id,
+            technician_name=technician_name,
+            supervisor_name=supervisor_name,
+        )
+
+        if not self.email_config or not self.email_config.sender_password:
+            logger.info(
+                "SMTP credentials not configured; simulating incident email [%s] to %s",
+                incident_id,
+                technician_email,
+            )
+            return {
+                "sent": False,
+                "simulated": True,
+                "incident_id": incident_id,
+                "recipient": technician_email,
+                "subject": subject,
+            }
+
+        try:
+            config = self.email_config
+            recipients = [technician_email] + [
+                r for r in config.recipients if r != technician_email
+            ]
+            msg = MIMEMultipart()
+            msg["From"] = config.sender_email
+            msg["To"] = ", ".join(recipients)
+            msg["Subject"] = subject
+            msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+            if pdf_path:
+                pdf_file = Path(pdf_path)
+                if pdf_file.exists():
+                    with open(pdf_file, "rb") as f:
+                        attachment = MIMEBase("application", "pdf")
+                        attachment.set_payload(f.read())
+                    encoders.encode_base64(attachment)
+                    attachment.add_header(
+                        "Content-Disposition",
+                        f"attachment; filename={pdf_file.name}",
+                    )
+                    msg.attach(attachment)
+
+            context = ssl.create_default_context()
+            if config.use_tls:
+                with smtplib.SMTP(config.smtp_server, config.smtp_port, timeout=15) as server:
+                    server.ehlo()
+                    server.starttls(context=context)
+                    server.ehlo()
+                    server.login(config.sender_email, config.sender_password)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP_SSL(
+                    config.smtp_server, config.smtp_port, context=context, timeout=15
+                ) as server:
+                    server.login(config.sender_email, config.sender_password)
+                    server.send_message(msg)
+
+            logger.info("Incident email [%s] sent to %s", incident_id, technician_email)
+            return {
+                "sent": True,
+                "simulated": False,
+                "incident_id": incident_id,
+                "recipient": technician_email,
+                "subject": subject,
+            }
+        except Exception as exc:
+            logger.error("Failed to send incident email [%s]: %s", incident_id, exc)
+            return {
+                "sent": False,
+                "simulated": True,
+                "error": str(exc),
+                "incident_id": incident_id,
+                "recipient": technician_email,
+                "subject": subject,
+            }
+
+    # ------------------------------------------------------------------
     # Simulation (for demo / portfolio purposes)
     # ------------------------------------------------------------------
 

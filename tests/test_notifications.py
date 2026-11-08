@@ -167,3 +167,31 @@ class TestRoutingLogic:
         orchestrator = NotificationOrchestrator()
         result = orchestrator.dispatch([])
         assert result["total_alerts"] == 0
+
+
+class TestIncidentAlertFormatting:
+    """Verify incident work order email formatting for on-duty technician."""
+
+    def test_incident_email_contains_incident_id_location_and_supervisor_instructions(
+        self, critical_alert
+    ):
+        critical_alert.details = {
+            "panel_id": "PNL-B04-12",
+            "location_block": "Bloque B - Fila 4 - Posicion 12",
+            "latitude": 4.9186,
+            "longitude": -73.9982,
+        }
+        orchestrator = NotificationOrchestrator()
+        subject = orchestrator._build_incident_subject("INC-2026-0001", [critical_alert])
+        body = orchestrator._build_incident_email_html(
+            alerts=[critical_alert],
+            incident_id="INC-2026-0001",
+            technician_name="Ana Reclutadora",
+            supervisor_name="Ing. Miguel Angel Mejia Sanchez",
+        )
+        assert "[INC-2026-0001]" in subject
+        assert "PNL-B04-12" in body
+        assert "Bloque B - Fila 4 - Posicion 12" in body
+        assert "Ing. Miguel Angel Mejia Sanchez" in body
+        assert "preparar" in body.lower()
+
