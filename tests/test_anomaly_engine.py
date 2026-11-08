@@ -243,3 +243,15 @@ class TestInstantPanelFaultDetector:
         assert alerts[0].severity == Severity.CRITICAL
         assert alerts[0].details["panel_id"] == "PNL-C02-05"
 
+    def test_instant_detector_catches_night_hardware_fault(self, normal_daylight_df):
+        df = normal_daylight_df.copy()
+        df["is_daylight"] = False
+        df["irradiance_poa"] = 0.0
+        df["panel_id"] = "PNL-A01-02"
+        df.loc[df.index[-1], "status_code"] = "0x05"
+
+        detector = InstantPanelFaultDetector()
+        alerts = detector.detect(df)
+        assert len(alerts) == 1
+        assert alerts[0].details["panel_id"] == "PNL-A01-02"
+

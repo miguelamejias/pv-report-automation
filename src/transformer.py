@@ -42,7 +42,7 @@ STATUS_CODE_MAP = {
     "0x05": "Isolation Fault",
     "0x06": "Ground Fault",
     "0x07": "Fan Failure",
-    "0xFF": "Communication Lost",
+    "0xff": "Communication Lost",
 }
 
 

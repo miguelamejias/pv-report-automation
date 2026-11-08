@@ -139,3 +139,45 @@ def test_imap_mime_and_multipart_extraction_and_polling(monkeypatch):
     assert "Panel reparado" in reply["body"]
 
 
+def test_imap_falls_back_to_all_when_unseen_empty(monkeypatch):
+    from email.mime.text import MIMEText
+    import imaplib
+    from src.imap_listener import IMAPConfig, IMAPListener
+
+    msg = MIMEText("Reparado en sitio y verificado.", "plain", "utf-8")
+    msg["Subject"] = "Re: [INC-2026-99] Alerta"
+    msg["From"] = "laura@empresa.com"
+    raw_bytes = msg.as_bytes()
+
+    class FakeIMAPSeenOnly:
+        def __init__(self, host, port):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def login(self, user, pwd):
+            return "OK", [b"Logged in"]
+
+        def select(self, box):
+            return "OK", [b"1"]
+
+        def search(self, charset, criteria):
+            if criteria == "UNSEEN":
+                return "OK", [b""]
+            return "OK", [b"1"]
+
+        def fetch(self, num, parts):
+            return "OK", [(b"1 (RFC822)", raw_bytes)]
+
+    monkeypatch.setattr(imaplib, "IMAP4_SSL", FakeIMAPSeenOnly)
+    icfg = IMAPConfig("imap.gmail.com", 993, "noc@enertec.com", "secret")
+    listener = IMAPListener(config=icfg)
+    reply = listener.check_for_resolution_reply("INC-2026-99", "laura@empresa.com")
+    assert reply is not None
+    assert reply["incident_id"] == "INC-2026-99"
+
+

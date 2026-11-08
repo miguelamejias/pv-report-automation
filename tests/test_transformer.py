@@ -223,6 +223,12 @@ class TestStatusCodes:
         result = transformer.load_csv(filepath)
         assert result.iloc[0]["status_description"] == "Unknown Code"
 
+    def test_status_code_0xff_mapped(self, transformer, valid_csv_data):
+        """0xFF uppercase/lowercase should map to 'Communication Lost'."""
+        valid_csv_data.loc[0, "status_code"] = "0xFF"
+        result = transformer.transform_dataframe(valid_csv_data)
+        assert result.iloc[0]["status_description"] == "Communication Lost"
+
 
 # ---------------------------------------------------------------------------
 # Tests: File handling

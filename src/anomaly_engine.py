@@ -376,16 +376,18 @@ class InstantPanelFaultDetector:
         if df.empty:
             return alerts
 
-        daylight = df[df["is_daylight"]].copy() if "is_daylight" in df.columns else df.copy()
-        if daylight.empty:
-            return alerts
+        is_day = (
+            df["is_daylight"].astype(bool)
+            if "is_daylight" in df.columns
+            else pd.Series(True, index=df.index)
+        )
 
         fault_mask = (
-            (daylight["delta_v_dc_pct"] > self.delta_v_threshold_pct)
-            | (daylight["temp_heatsink"] > self.max_temp_c)
-            | (daylight["status_code"].astype(str).str.lower() != "0x00")
+            (is_day & (df["delta_v_dc_pct"] > self.delta_v_threshold_pct))
+            | (df["temp_heatsink"] > self.max_temp_c)
+            | (df["status_code"].astype(str).str.lower() != "0x00")
         )
-        fault_rows = daylight[fault_mask]
+        fault_rows = df[fault_mask]
         if fault_rows.empty:
             return alerts
 

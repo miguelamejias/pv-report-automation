@@ -119,8 +119,10 @@ class IMAPListener:
                 mail.login(self.config.email_address, self.config.password)
                 mail.select("INBOX")
 
-                # Search unseen messages first
+                # Search unseen messages first, fallback to recent messages if already marked Seen
                 status, data = mail.search(None, "UNSEEN")
+                if status != "OK" or not data or not data[0]:
+                    status, data = mail.search(None, "ALL")
                 if status != "OK" or not data or not data[0]:
                     return None
 
