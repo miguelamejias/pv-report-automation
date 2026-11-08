@@ -105,11 +105,27 @@ class SolarDataTransformer:
 
         logger.info("Loading raw data from %s", filepath)
         df = pd.read_csv(filepath)
+        return self.transform_dataframe(df)
+
+    def transform_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Run the full transformation pipeline on an in-memory DataFrame.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Raw telemetry DataFrame (from CSV or Google Sheets).
+
+        Returns
+        -------
+        pd.DataFrame
+            Cleaned, enriched DataFrame with location and KPI columns.
+        """
         self._raw_row_count = len(df)
 
         # --- Full pipeline via method chaining ---
         df = (
             self._validate_columns(df)
+            .pipe(self._ensure_location_columns)
             .pipe(self._parse_timestamps)
             .pipe(self._clean_numeric_columns)
             .pipe(self._decode_status_codes)
@@ -149,6 +165,39 @@ class SolarDataTransformer:
         if missing:
             raise ValueError(f"Missing required columns: {missing}")
         logger.debug("Column validation passed.")
+        return df
+
+    def _ensure_location_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Ensure panel identification and physical location columns exist.
+
+        Populates sensible defaults when processing legacy v2.0 CSV files
+        that lack explicit panel location columns.
+        """
+        df = df.copy()
+        if "panel_id" not in df.columns:
+            df["panel_id"] = "PNL-A01-01"
+        else:
+            df["panel_id"] = df["panel_id"].fillna("PNL-A01-01").astype(str)
+
+        if "location_block" not in df.columns:
+            df["location_block"] = "Bloque A - Fila 1 - Posicion 1"
+        else:
+            df["location_block"] = (
+                df["location_block"]
+                .fillna("Bloque A - Fila 1 - Posicion 1")
+                .astype(str)
+            )
+
+        if "latitude" not in df.columns:
+            df["latitude"] = 4.9186
+        else:
+            df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce").fillna(4.9186)
+
+        if "longitude" not in df.columns:
+            df["longitude"] = -73.9982
+        else:
+            df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce").fillna(-73.9982)
+
         return df
 
     def _parse_timestamps(self, df: pd.DataFrame) -> pd.DataFrame:

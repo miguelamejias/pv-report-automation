@@ -146,8 +146,24 @@ def generate_row(ts: datetime, day: int, hour: float) -> dict:
     if random.random() < 0.01 and irr > 100:
         status = random.choice(["0x01", "0x02", "0x04", "0x07"])
 
+    # Assign physical panel location metadata
+    panel_catalog = [
+        ("PNL-A01-01", "Bloque A - Fila 1 - Posicion 1", 4.9186, -73.9982),
+        ("PNL-A02-04", "Bloque A - Fila 2 - Posicion 4", 4.9188, -73.9980),
+        ("PNL-B04-12", "Bloque B - Fila 4 - Posicion 12", 4.9192, -73.9975),
+        ("PNL-C03-08", "Bloque C - Fila 3 - Posicion 8", 4.9195, -73.9971),
+    ]
+    if day == ISOLATION_FAULT_DAY and 10.0 <= hour <= 13.0:
+        panel_id, loc_block, lat, lon = panel_catalog[2]
+    else:
+        panel_id, loc_block, lat, lon = panel_catalog[int(hour * 4) % len(panel_catalog)]
+
     return {
         "timestamp": ts.isoformat(),
+        "panel_id": panel_id,
+        "location_block": loc_block,
+        "latitude": lat,
+        "longitude": lon,
         "v_dc_string_1": round(v_dc_1, 2),
         "v_dc_string_2": round(v_dc_2, 2),
         "v_dc_string_3": round(max(0, v_dc_3), 2),
@@ -166,6 +182,10 @@ def main():
 
     fieldnames = [
         "timestamp",
+        "panel_id",
+        "location_block",
+        "latitude",
+        "longitude",
         "v_dc_string_1",
         "v_dc_string_2",
         "v_dc_string_3",
@@ -205,7 +225,7 @@ def main():
     print(f"     - Soiling: days {SOILING_START_DAY + 1}-{DAYS}")
     print(f"     - Clipping: day {CLIPPING_DAY + 1}")
     print(f"     - Isolation fault: day {ISOLATION_FAULT_DAY + 1}")
-    print(f"     - Panel group failure (String 3): day {PANEL_FAULT_START_DAY + 1} onset → critical day {ISOLATION_FAULT_DAY + 1}-{DAYS}")
+    print(f"     - Panel group failure (String 3): day {PANEL_FAULT_START_DAY + 1} onset -> critical day {ISOLATION_FAULT_DAY + 1}-{DAYS}")
 
 
 if __name__ == "__main__":
