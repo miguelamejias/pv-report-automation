@@ -223,6 +223,12 @@ class TestStatusCodes:
         result = transformer.load_csv(filepath)
         assert result.iloc[0]["status_description"] == "Unknown Code"
 
+    def test_status_code_0xff_mapped(self, transformer, valid_csv_data):
+        """0xFF uppercase/lowercase should map to 'Communication Lost'."""
+        valid_csv_data.loc[0, "status_code"] = "0xFF"
+        result = transformer.transform_dataframe(valid_csv_data)
+        assert result.iloc[0]["status_description"] == "Communication Lost"
+
 
 # ---------------------------------------------------------------------------
 # Tests: File handling
@@ -235,3 +241,29 @@ class TestFileHandling:
         """Should raise FileNotFoundError for missing files."""
         with pytest.raises(FileNotFoundError):
             transformer.load_csv("nonexistent_file.csv")
+
+
+class TestLocationMetadata:
+    """Verify panel location columns and in-memory DataFrame transformation."""
+
+    def test_default_location_columns_populated_when_missing(
+        self, transformer, valid_csv_data
+    ):
+        df = transformer.transform_dataframe(valid_csv_data)
+        assert "panel_id" in df.columns
+        assert "location_block" in df.columns
+        assert "latitude" in df.columns
+        assert "longitude" in df.columns
+        assert df["panel_id"].iloc[0] == "PNL-A01-01"
+
+    def test_preserves_existing_location_columns(self, transformer, valid_csv_data):
+        valid_csv_data["panel_id"] = "PNL-B04-12"
+        valid_csv_data["location_block"] = "Bloque B - Fila 4 - Posicion 12"
+        valid_csv_data["latitude"] = 4.9200
+        valid_csv_data["longitude"] = -73.9900
+        df = transformer.transform_dataframe(valid_csv_data)
+        assert df["panel_id"].iloc[0] == "PNL-B04-12"
+        assert df["location_block"].iloc[0] == "Bloque B - Fila 4 - Posicion 12"
+        assert float(df["latitude"].iloc[0]) == pytest.approx(4.9200)
+        assert float(df["longitude"].iloc[0]) == pytest.approx(-73.9900)
+

@@ -460,6 +460,115 @@ class ReportGenerator:
         logger.info("PDF report saved: %s", output_path)
         return output_path
 
+    def generate_incident_pdf(
+        self,
+        df: pd.DataFrame,
+        alerts: list[Alert],
+        incident_id: str,
+        technician_name: str,
+        supervisor_name: str = "Ing. Miguel Angel Mejia Sanchez",
+        filename: Optional[str] = None,
+    ) -> Path:
+        """Generate an Incident Work Order PDF for field technicians.
+
+        Includes physical panel location (panel_id, location_block, GPS),
+        assigned technician & supervisor details, and mandatory PPE/safety
+        checklist.
+        """
+        if not FPDF_AVAILABLE:
+            logger.warning("FPDF2 not installed. Skipping Incident PDF.")
+            return Path("")
+
+        if filename is None:
+            filename = f"incident_{incident_id}.pdf"
+
+        summary = self.compute_summary(df)
+        primary_alert = alerts[0] if alerts else None
+        details = primary_alert.details if primary_alert else {}
+
+        panel_id = self._sanitize_for_pdf(str(details.get("panel_id", "PNL-B04-12")))
+        loc_block = self._sanitize_for_pdf(
+            str(details.get("location_block", "Bloque B - Fila 4 - Posicion 12"))
+        )
+        lat = details.get("latitude", 4.9186)
+        lon = details.get("longitude", -73.9982)
+        tech_clean = self._sanitize_for_pdf(technician_name)
+        sup_clean = self._sanitize_for_pdf(supervisor_name)
+
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.add_page()
+
+        # Header banner
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.set_text_color(231, 76, 60)
+        pdf.cell(
+            0,
+            12,
+            self._sanitize_for_pdf(f"ORDEN DE TRABAJO DE EMERGENCIA - [{incident_id}]"),
+            ln=True,
+            align="C",
+        )
+
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(52, 73, 94)
+        pdf.cell(
+            0,
+            7,
+            self._sanitize_for_pdf(
+                f"Planta: {self.plant_name} | Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            ),
+            ln=True,
+            align="C",
+        )
+        pdf.ln(4)
+
+        # Assignment & Location Box
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_text_color(44, 62, 80)
+        pdf.cell(0, 8, "1. Asignacion Operativa y Ubicacion del Panel", ln=True)
+
+        info_rows = [
+            ("ID de Incidente", incident_id),
+            ("Tecnico Asignado en Turno", tech_clean),
+            ("Supervisor de Operaciones", sup_clean),
+            ("ID del Panel / String", panel_id),
+            ("Ubicacion Fisica en Planta", loc_block),
+            ("Coordenadas GPS", f"{lat}, {lon}"),
+        ]
+        for label, val in info_rows:
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.cell(65, 7, f"  {label}:", ln=False)
+            pdf.set_font("Helvetica", "", 10)
+            pdf.cell(0, 7, self._sanitize_for_pdf(str(val)), ln=True)
+
+        pdf.ln(4)
+        self._pdf_alert_table(pdf, alerts)
+
+        # Mandatory Safety & Action Protocol
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_text_color(44, 62, 80)
+        pdf.cell(0, 8, "2. Protocolo Obligatorio de Intervencion", ln=True)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(52, 73, 94)
+
+        steps = [
+            "1. Preparar kit de herramientas dielectricas, pinza amperimetrica DC, camara termografica y EPP completo (guantes clase 0, casco, gafas).",
+            f"2. Comunicarse inmediatamente con el supervisor ({sup_clean}) antes de abrir seccionadores DC o intervenir el string.",
+            f"3. Desplazarse a {loc_block} (Panel {panel_id}) y verificar conectores MC4, diodos bypass y aislamiento de string.",
+            f"4. Una vez corregido el fallo, RESPONDER al correo de alerta [{incident_id}] confirmando la reparacion para normalizar el sistema.",
+        ]
+        for step in steps:
+            pdf.multi_cell(0, 6, f"  {self._sanitize_for_pdf(step)}")
+            pdf.ln(1)
+
+        self._pdf_footer(pdf)
+
+        output_path = self.output_dir / filename
+        pdf.output(str(output_path))
+        logger.info("Incident PDF report saved: %s", output_path)
+        return output_path
+
     # -- PDF helper methods --
 
     def _pdf_header(self, pdf: FPDF, summary: dict) -> None:

@@ -21,12 +21,22 @@ Author: Miguel Ángel Mejía Sánchez
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587  # 587 for STARTTLS, 465 for SSL
+IMAP_SERVER = "imap.gmail.com"
+IMAP_PORT = 993  # 993 for IMAP4 SSL (detects technician email replies)
 SENDER_EMAIL = "your_email@gmail.com"
 SENDER_PASSWORD = "your_app_specific_password"
 RECIPIENTS = [
     "supervisor@enertec.com",
     "operaciones@enertec.com",
 ]
+
+# ---------------------------------------------------------------------------
+# Google Sheets Live Telemetry Configuration (v3.0 Interactive NOC)
+# ---------------------------------------------------------------------------
+# Share a Google Sheet from Google Drive ("Anyone with the link can view/edit")
+# and paste its URL or ID below.
+GOOGLE_SHEET_URL = ""
+GOOGLE_SERVICE_ACCOUNT_JSON = ""  # Optional path to service_account.json for API write-back
 
 # ---------------------------------------------------------------------------
 # Slack Webhook Configuration

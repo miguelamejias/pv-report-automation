@@ -21,6 +21,7 @@ from src.anomaly_engine import (
     Alert,
     AnomalyEngine,
     ClippingDetector,
+    InstantPanelFaultDetector,
     IsolationFaultDetector,
     Severity,
     SoilingDetector,
@@ -37,12 +38,12 @@ def normal_daylight_df() -> pd.DataFrame:
     hours = pd.date_range("2024-03-15 06:00", periods=12, freq="h", tz="America/Bogota")
     return pd.DataFrame({
         "timestamp": hours,
-        "v_dc_string_1": [380] * 12,
-        "v_dc_string_2": [378] * 12,
-        "i_dc_total": [12] * 12,
-        "p_ac_output": [4500] * 12,
-        "temp_heatsink": [40] * 12,
-        "irradiance_poa": [800] * 12,
+        "v_dc_string_1": [380.0] * 12,
+        "v_dc_string_2": [378.0] * 12,
+        "i_dc_total": [12.0] * 12,
+        "p_ac_output": [4500.0] * 12,
+        "temp_heatsink": [40.0] * 12,
+        "irradiance_poa": [800.0] * 12,
         "status_code": ["0x00"] * 12,
         "delta_v_dc_pct": [0.5] * 12,
         "efficiency": [95] * 12,
@@ -115,9 +116,9 @@ class TestEngineRegistration:
             engine.register("not_a_detector")
 
     def test_create_default_engine(self):
-        """Default factory should register all 3 built-in detectors."""
+        """Default factory should register all 4 built-in detectors."""
         engine = AnomalyEngine.create_default()
-        assert engine.detector_count == 3
+        assert engine.detector_count == 4
 
     def test_method_chaining(self):
         """Register should return self for chaining."""
@@ -206,3 +207,51 @@ class TestEdgeCases:
             severity_order = {Severity.CRITICAL: 0, Severity.WARNING: 1, Severity.INFO: 2}
             for i in range(len(alerts) - 1):
                 assert severity_order[alerts[i].severity] <= severity_order[alerts[i + 1].severity]
+
+
+class TestInstantPanelFaultDetector:
+    """Verify single-row / instant panel fault detection with location metadata."""
+
+    def test_instant_detector_catches_single_row_voltage_drop(self, normal_daylight_df):
+        df = normal_daylight_df.copy()
+        df["panel_id"] = "PNL-B04-12"
+        df["location_block"] = "Bloque B - Fila 4 - Posicion 12"
+        df["latitude"] = 4.9195
+        df["longitude"] = -73.9975
+        df.loc[df.index[-1], "v_dc_string_2"] = 180.0
+        df.loc[df.index[-1], "delta_v_dc_pct"] = 42.0
+
+        detector = InstantPanelFaultDetector()
+        alerts = detector.detect(df)
+        assert len(alerts) == 1
+        assert alerts[0].severity == Severity.CRITICAL
+        assert alerts[0].details["panel_id"] == "PNL-B04-12"
+        assert alerts[0].details["location_block"] == "Bloque B - Fila 4 - Posicion 12"
+
+    def test_instant_detector_catches_hardware_status_or_overtemp(self, normal_daylight_df):
+        df = normal_daylight_df.copy()
+        df["panel_id"] = "PNL-C02-05"
+        df["location_block"] = "Bloque C - Fila 2 - Posicion 5"
+        df["latitude"] = 4.9180
+        df["longitude"] = -73.9990
+        df.loc[df.index[-1], "temp_heatsink"] = 89.5
+        df.loc[df.index[-1], "status_code"] = "0x04"
+
+        detector = InstantPanelFaultDetector()
+        alerts = detector.detect(df)
+        assert len(alerts) >= 1
+        assert alerts[0].severity == Severity.CRITICAL
+        assert alerts[0].details["panel_id"] == "PNL-C02-05"
+
+    def test_instant_detector_catches_night_hardware_fault(self, normal_daylight_df):
+        df = normal_daylight_df.copy()
+        df["is_daylight"] = False
+        df["irradiance_poa"] = 0.0
+        df["panel_id"] = "PNL-A01-02"
+        df.loc[df.index[-1], "status_code"] = "0x05"
+
+        detector = InstantPanelFaultDetector()
+        alerts = detector.detect(df)
+        assert len(alerts) == 1
+        assert alerts[0].details["panel_id"] == "PNL-A01-02"
+

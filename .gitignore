@@ -36,6 +36,9 @@ output/
 # OS files
 .DS_Store
 Thumbs.db
+.superpowers/
+.worktrees/
+
 desktop.ini
 
 # Testing / Coverage

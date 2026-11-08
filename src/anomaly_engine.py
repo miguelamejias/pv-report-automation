@@ -213,51 +213,54 @@ class ClippingDetector:
         if daylight.empty:
             return alerts
 
-        peak_power = daylight["p_ac_output"].max()
-        if peak_power <= 0:
-            return alerts
+        daylight["date"] = daylight["timestamp"].dt.date
 
-        # Define "flat" band around peak power
-        lower_bound = peak_power * (1 - self.flat_tolerance_pct / 100)
+        for _, day_df in daylight.groupby("date"):
+            peak_power = day_df["p_ac_output"].max()
+            if peak_power <= 0:
+                continue
 
-        # Find rows where power is in the flat band
-        clipping_mask = daylight["p_ac_output"] >= lower_bound
-        clipping_rows = daylight[clipping_mask]
+            # Define "flat" band around peak power
+            lower_bound = peak_power * (1 - self.flat_tolerance_pct / 100)
 
-        if len(clipping_rows) < 2:
-            return alerts
+            # Find rows where power is in the flat band
+            clipping_mask = day_df["p_ac_output"] >= lower_bound
+            clipping_rows = day_df[clipping_mask]
 
-        # Check if irradiance is rising during clipping
-        irr_start = clipping_rows["irradiance_poa"].iloc[0]
-        irr_end = clipping_rows["irradiance_poa"].iloc[-1]
-        irr_rise = irr_end - irr_start
+            if len(clipping_rows) < 2:
+                continue
 
-        # Check duration
-        time_start = clipping_rows["timestamp"].iloc[0]
-        time_end = clipping_rows["timestamp"].iloc[-1]
-        duration_minutes = (time_end - time_start).total_seconds() / 60
+            # Check if irradiance is rising during clipping
+            irr_start = clipping_rows["irradiance_poa"].iloc[0]
+            irr_end = clipping_rows["irradiance_poa"].max()
+            irr_rise = irr_end - irr_start
 
-        if (
-            irr_rise >= self.min_irradiance_rise
-            and duration_minutes >= self.min_clipping_minutes
-        ):
-            alerts.append(Alert(
-                rule_name="Inverter Clipping",
-                severity=Severity.INFO,
-                message=(
-                    f"Inverter clipping detected for {duration_minutes:.0f} minutes. "
-                    f"AC power capped at ~{peak_power:.0f}W while irradiance rose "
-                    f"by {irr_rise:.0f} W/m². Consider inverter capacity review."
-                ),
-                timestamp_start=time_start.to_pydatetime(),
-                timestamp_end=time_end.to_pydatetime(),
-                details={
-                    "peak_power_w": round(float(peak_power), 1),
-                    "irradiance_rise_wm2": round(float(irr_rise), 1),
-                    "duration_minutes": round(duration_minutes, 1),
-                },
-            ))
-            logger.info("Clipping detected: %.0f min at %.0fW.", duration_minutes, peak_power)
+            # Check duration
+            time_start = clipping_rows["timestamp"].iloc[0]
+            time_end = clipping_rows["timestamp"].iloc[-1]
+            duration_minutes = (time_end - time_start).total_seconds() / 60
+
+            if (
+                irr_rise >= self.min_irradiance_rise
+                and duration_minutes >= self.min_clipping_minutes
+            ):
+                alerts.append(Alert(
+                    rule_name="Inverter Clipping",
+                    severity=Severity.INFO,
+                    message=(
+                        f"Inverter clipping detected for {duration_minutes:.0f} minutes. "
+                        f"AC power capped at ~{peak_power:.0f}W while irradiance rose "
+                        f"by {irr_rise:.0f} W/m². Consider inverter capacity review."
+                    ),
+                    timestamp_start=time_start.to_pydatetime(),
+                    timestamp_end=time_end.to_pydatetime(),
+                    details={
+                        "peak_power_w": round(float(peak_power), 1),
+                        "irradiance_rise_wm2": round(float(irr_rise), 1),
+                        "duration_minutes": round(duration_minutes, 1),
+                    },
+                ))
+                logger.info("Clipping detected: %.0f min at %.0fW.", duration_minutes, peak_power)
 
         return alerts
 
@@ -348,6 +351,94 @@ class IsolationFaultDetector:
                 logger.critical(
                     "Isolation fault: ΔV=%.1f%% for %.0f min.", avg_delta, duration
                 )
+
+        return alerts
+
+
+class InstantPanelFaultDetector:
+    """Detects single-row or instantaneous panel/string faults with physical location.
+
+    Designed for real-time NOC telemetry tables (e.g. Google Sheets) where
+    an operator or sensor reports an immediate voltage drop, overtemperature,
+    or non-zero hardware status code on a specific panel/string.
+    """
+
+    def __init__(
+        self,
+        delta_v_threshold_pct: float = 15.0,
+        max_temp_c: float = 75.0,
+    ) -> None:
+        self.delta_v_threshold_pct = delta_v_threshold_pct
+        self.max_temp_c = max_temp_c
+
+    def detect(self, df: pd.DataFrame) -> list[Alert]:
+        alerts: list[Alert] = []
+        if df.empty:
+            return alerts
+
+        is_day = (
+            df["is_daylight"].astype(bool)
+            if "is_daylight" in df.columns
+            else pd.Series(True, index=df.index)
+        )
+
+        fault_mask = (
+            (is_day & (df["delta_v_dc_pct"] > self.delta_v_threshold_pct))
+            | (df["temp_heatsink"] > self.max_temp_c)
+            | (df["status_code"].astype(str).str.lower() != "0x00")
+        )
+        fault_rows = df[fault_mask]
+        if fault_rows.empty:
+            return alerts
+
+        # Group by panel_id so each affected panel produces one concise CRITICAL alert
+        group_col = "panel_id" if "panel_id" in fault_rows.columns else None
+        groups = fault_rows.groupby(group_col) if group_col else [(None, fault_rows)]
+
+        for _, panel_df in groups:
+            row = panel_df.iloc[-1]
+            panel_id = str(row.get("panel_id", "PNL-A01-01"))
+            loc_block = str(row.get("location_block", "Bloque A - Fila 1 - Posicion 1"))
+            lat = float(row.get("latitude", 4.9186))
+            lon = float(row.get("longitude", -73.9982))
+            delta_v = float(row.get("delta_v_dc_pct", 0.0))
+            temp_c = float(row.get("temp_heatsink", 0.0))
+            status_code = str(row.get("status_code", "0x00"))
+            ts = row["timestamp"]
+            ts_dt = ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
+
+            reasons = []
+            if delta_v > self.delta_v_threshold_pct:
+                reasons.append(f"ΔV entre strings = {delta_v:.1f}% (umbral {self.delta_v_threshold_pct}%)")
+            if temp_c > self.max_temp_c:
+                reasons.append(f"Sobretemperatura = {temp_c:.1f}°C (máx {self.max_temp_c}°C)")
+            if status_code.lower() != "0x00":
+                reasons.append(f"Código hardware = {status_code.upper()}")
+
+            reason_str = "; ".join(reasons) if reasons else "Anomalía en parámetros eléctricos"
+
+            alerts.append(Alert(
+                rule_name="Instant Panel Fault",
+                severity=Severity.CRITICAL,
+                message=(
+                    f"Falla crítica en panel {panel_id} ({loc_block}): {reason_str}. "
+                    f"Preparar EPP/herramientas y coordinar con supervisor."
+                ),
+                timestamp_start=ts_dt,
+                timestamp_end=ts_dt,
+                details={
+                    "panel_id": panel_id,
+                    "location_block": loc_block,
+                    "latitude": lat,
+                    "longitude": lon,
+                    "row_index": int(panel_df.index[-1]),
+                    "v_dc_string_1": float(row.get("v_dc_string_1", 0.0)),
+                    "v_dc_string_2": float(row.get("v_dc_string_2", 0.0)),
+                    "delta_v_dc_pct": round(delta_v, 2),
+                    "temp_heatsink": round(temp_c, 1),
+                    "status_code": status_code,
+                },
+            ))
 
         return alerts
 
@@ -443,6 +534,7 @@ class AnomalyEngine:
             fault detectors using default thresholds.
         """
         engine = cls()
+        engine.register(InstantPanelFaultDetector())
         engine.register(SoilingDetector())
         engine.register(ClippingDetector())
         engine.register(IsolationFaultDetector())

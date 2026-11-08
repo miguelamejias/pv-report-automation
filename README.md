@@ -150,7 +150,26 @@ docker run --rm -v $(pwd)/output:/app/output pv-report-automation
 
 ## ⚡ Uso Rápido
 
-### Procesamiento básico (modo simulación)
+### 🖥️ Plataforma Web Interactiva NOC v3.0 (Recomendado para Demos en Vivo)
+
+Lanza el Centro de Operaciones de Red (NOC) interactivo en tu navegador:
+
+```bash
+streamlit run app.py
+```
+
+**Flujo de prueba interactiva para Reclutadores (Ciclo 360°):**
+1. **Registro como Técnico en Turno:** El reclutador ingresa su nombre y su correo electrónico en la barra lateral. Su estado aparece como `🟢 DISPONIBLE — Planta al 100%`.
+2. **Sabotaje en Vivo (Google Sheets / Tabla de Telemetría):** Desde el Google Sheet compartido en Drive (o en la tabla interactiva de la plataforma), se modifica el voltaje o temperatura de un panel (ej. `PNL-B04-12` en `Bloque B - Fila 4 - Posición 12`).
+3. **Asignación de Emergencia y Alerta por Correo:**
+   - El estado del técnico cambia automáticamente a `🔴 EMERGENCIA ASIGNADA [INC-XXXX]`.
+   - El mapa GPS resalta el panel dañado y genera la **Orden de Trabajo en PDF**.
+   - Llega un correo electrónico real al reclutador indicando la ubicación del panel y las instrucciones: **preparar herramientas/EPP y comunicarse con su supervisor (`Ing. Miguel Ángel Mejía Sánchez`)**.
+4. **Resolución Respondiendo al Correo (`Reply`):** El reclutador responde al correo dando aviso de que atendió la emergencia; el sistema lee la respuesta vía `IMAP SSL`, restaura los valores nominales en la hoja de cálculo y devuelve la plataforma a `🟢 SISTEMA NORMALIZADO AL 100%`.
+
+---
+
+### 💻 Procesamiento por Consola CLI (modo simulación)
 
 ```bash
 python main.py
