@@ -24,12 +24,6 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src import __version__
-import src.incident_manager as _inc_mod
-import src.sheets_manager as _sheets_mod
-
-importlib.reload(_sheets_mod)
-importlib.reload(_inc_mod)
-
 from src.imap_listener import IMAPConfig, IMAPListener
 from src.incident_manager import IncidentManager, TechnicianState
 from src.notifications import EmailConfig, NotificationOrchestrator
@@ -228,6 +222,7 @@ def main() -> None:
         page_title="ENERTEC Solar NOC v3.0 — Plataforma de Técnico en Turno",
         page_icon="⚡",
         layout="wide",
+        initial_sidebar_state="collapsed",
     )
     init_session_state()
 
@@ -236,69 +231,72 @@ def main() -> None:
     transformer = SolarDataTransformer()
 
     # ------------------------------------------------------------------
-    # Sidebar: Recruiter Onboarding & Google Sheets / Email Connection
+    # Header & Collapsible Configuration Menu (Desplegable)
     # ------------------------------------------------------------------
-    with st.sidebar:
-        st.markdown("## 👷 Registro de Técnico en Turno")
-        st.caption(
-            "Regístrese con su correo real para recibir alertas de fallas desde Google Sheets y cerrar incidentes respondiendo el correo."
-        )
+    st.title(f"⚡ ENERTEC Solar NOC v{__version__} — Centro de Control e Incidentes")
 
-        tech_name = st.text_input(
-            "Nombre del Técnico (Reclutador)",
-            value=inc_mgr.technician_name
-            if inc_mgr.technician_name != "Técnico en Turno"
-            else "Ing. Reclutador Invitado",
-        )
-        tech_email = st.text_input(
-            "Correo Electrónico (Para recibir alerta)",
-            value=inc_mgr.technician_email or st.session_state.cfg["sender_email"],
-            placeholder="reclutador@empresa.com",
-        )
-        sup_name = st.text_input(
-            "Supervisor Asignado",
-            value=inc_mgr.supervisor_name,
-        )
+    with st.expander(
+        "⚙️ Menú de Configuración Desplegable (Técnico en Turno, Google Sheets y Correo SMTP/IMAP)",
+        expanded=False,
+    ):
+        cfg_col1, cfg_col2, cfg_col3 = st.columns(3)
 
-        if st.button("✅ Registrar / Actualizar Técnico", use_container_width=True):
+        with cfg_col1:
+            st.markdown("#### 👷 1. Técnico en Turno")
+            tech_name = st.text_input(
+                "Nombre del Técnico (Reclutador)",
+                value=inc_mgr.technician_name
+                if inc_mgr.technician_name != "Técnico en Turno"
+                else "Ing. Reclutador Invitado",
+            )
+            tech_email = st.text_input(
+                "Correo Electrónico (Recibe Alerta)",
+                value=inc_mgr.technician_email or st.session_state.cfg["sender_email"],
+                placeholder="reclutador@empresa.com",
+            )
+            sup_name = st.text_input(
+                "Supervisor Asignado",
+                value=inc_mgr.supervisor_name,
+            )
+            if st.button("✅ Guardar Técnico en Turno", use_container_width=True):
+                inc_mgr.register_technician(tech_name, tech_email, sup_name)
+                st.success(f"Técnico registrado: {inc_mgr.technician_name}")
+
             inc_mgr.register_technician(tech_name, tech_email, sup_name)
-            st.success(f"Técnico activo: {inc_mgr.technician_name}")
 
-        inc_mgr.register_technician(tech_name, tech_email, sup_name)
-
-        st.divider()
-        st.markdown("## 📊 Conexión Google Sheets (Drive)")
-        sheet_url_input = st.text_input(
-            "URL o ID del Google Sheet compartido",
-            value=sheets_mgr.share_url or st.session_state.cfg["google_sheet_url"],
-            placeholder="https://docs.google.com/spreadsheets/d/...",
-        )
-        if sheet_url_input != sheets_mgr.share_url:
-            sheets_mgr.sheet_id = GoogleSheetsManager.extract_sheet_id(sheet_url_input)
-
-        if sheets_mgr.sheet_id:
-            st.markdown(f"🔗 [Abrir Google Sheet en Vivo]({sheets_mgr.share_url})")
-
-        with open(sheets_mgr.local_csv_path, "rb") as f_csv:
-            st.download_button(
-                "📥 Descargar Telemetría CSV (Drive)",
-                data=f_csv.read(),
-                file_name="enertec_telemetria_vivo.csv",
-                mime="text/csv",
-                use_container_width=True,
+        with cfg_col2:
+            st.markdown("#### 📊 2. Google Sheets (Drive)")
+            sheet_url_input = st.text_input(
+                "URL o ID del Google Sheet compartido",
+                value=sheets_mgr.share_url or st.session_state.cfg["google_sheet_url"],
+                placeholder="https://docs.google.com/spreadsheets/d/...",
             )
+            if sheet_url_input != sheets_mgr.share_url:
+                sheets_mgr.sheet_id = GoogleSheetsManager.extract_sheet_id(sheet_url_input)
 
-        with open(sheets_mgr.history_csv_path, "rb") as f_hist:
-            st.download_button(
-                "📥 Descargar Historial Incidentes CSV",
-                data=f_hist.read(),
-                file_name="enertec_historial_incidentes.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
+            if sheets_mgr.sheet_id:
+                st.markdown(f"🔗 [Abrir Google Sheet en Vivo]({sheets_mgr.share_url})")
 
-        st.divider()
-        with st.expander("✉️ Configurar Correo Real (SMTP / IMAP)", expanded=False):
+            with open(sheets_mgr.local_csv_path, "rb") as f_csv:
+                st.download_button(
+                    "📥 Descargar Telemetría CSV (Drive)",
+                    data=f_csv.read(),
+                    file_name="enertec_telemetria_vivo.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+            with open(sheets_mgr.history_csv_path, "rb") as f_hist:
+                st.download_button(
+                    "📥 Descargar Historial Incidentes CSV",
+                    data=f_hist.read(),
+                    file_name="enertec_historial_incidentes.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+        with cfg_col3:
+            st.markdown("#### ✉️ 3. Correo Real (SMTP / IMAP)")
             sender_email = st.text_input(
                 "Correo Emisor NOC (Gmail)",
                 value=st.session_state.cfg["sender_email"],
@@ -328,12 +326,12 @@ def main() -> None:
                 st.caption("🟡 Modo Simulación Activo (ingresa App Password para envío real).")
 
     # ------------------------------------------------------------------
-    # Load & Evaluate Current Telemetry
+    # Load & Evaluate Current Telemetry (With Deduplication Cycle)
     # ------------------------------------------------------------------
     raw_df = sheets_mgr.fetch_telemetry()
     df = transformer.transform_dataframe(raw_df)
 
-    if inc_mgr.state == TechnicianState.EMERGENCY_ASSIGNED:
+    if getattr(inc_mgr.state, "value", None) == TechnicianState.EMERGENCY_ASSIGNED.value:
         inc_mgr.poll_imap_for_resolution()
         raw_df = sheets_mgr.fetch_telemetry()
         df = transformer.transform_dataframe(raw_df)
@@ -342,16 +340,20 @@ def main() -> None:
     history_df = sheets_mgr.fetch_incident_history()
 
     # ------------------------------------------------------------------
-    # Header & Live Status Banner
+    # Live Status Banner
     # ------------------------------------------------------------------
-    st.title(f"⚡ ENERTEC Solar NOC v{__version__} — Centro de Control e Incidentes")
     st.markdown(
         f"**Técnico en Turno:** `{inc_mgr.technician_name}` "
         f"({inc_mgr.technician_email or 'Sin correo registrado'}) | "
         f"**Supervisor:** `{inc_mgr.supervisor_name}`"
     )
 
-    if snapshot["state"] == TechnicianState.EMERGENCY_ASSIGNED:
+    is_emergency = (
+        getattr(snapshot["state"], "value", None)
+        == TechnicianState.EMERGENCY_ASSIGNED.value
+    )
+
+    if is_emergency:
         panel = snapshot["affected_panel"] or {}
         st.error(
             f"🔴 **ESTADO DEL TÉCNICO: EN EMERGENCIA ASIGNADA [{snapshot['incident_id']}]** — "
@@ -381,7 +383,7 @@ def main() -> None:
         col_act1, col_act2, col_act3 = st.columns(3)
         with col_act1:
             if st.button("🔄 Sincronizar Google Sheets / Buzón IMAP", use_container_width=True):
-                if inc_mgr.state == TechnicianState.EMERGENCY_ASSIGNED:
+                if is_emergency:
                     inc_mgr.poll_imap_for_resolution()
                 st.rerun()
         with col_act2:
@@ -407,7 +409,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Active Incident Work Order & Email Reply Panel (Only when Emergency Active)
     # ------------------------------------------------------------------
-    if snapshot["state"] == TechnicianState.EMERGENCY_ASSIGNED:
+    if is_emergency:
         panel = snapshot["affected_panel"] or {}
         with st.container(border=True):
             st.markdown("### 🚨 Orden de Trabajo Activa y Ubicación del Incidente")
@@ -419,13 +421,13 @@ def main() -> None:
 | Campo Operativo | Detalle del Incidente |
 | :--- | :--- |
 | **ID de Incidente** | `{snapshot['incident_id']}` |
-| **Estado Actual** | 🔴 `EN EMERGENCIA ASIGNADA` |
+| **Estado Actual** | 🔴 `EN EMERGENCIA ASIGNADA` (Notificación única enviada — sin reenvíos al recargar) |
 | **Panel / String Afectado** | **{panel.get('panel_id', 'PNL-B04-12')}** |
 | **Ubicación en Planta** | **{panel.get('location_block', 'Bloque B - Fila 4 - Posicion 12')}** |
 | **Coordenadas GPS** | `{panel.get('latitude', 4.9192)}, {panel.get('longitude', -73.9975)}` |
 | **Voltaje DC (S1 vs S2)** | `{panel.get('v_dc_string_1', 392.0):.1f} V` vs `{panel.get('v_dc_string_2', 168.0):.1f} V` ($\\Delta V = {panel.get('delta_v_dc_pct', 32.5):.1f}\\%$) |
 | **Temperatura Disipador** | `{panel.get('temp_heatsink', 87.5):.1f} °C` ( Estado Hex: `{panel.get('status_code', '0x05')}` ) |
-| **Alerta por Correo** | Enviada a `{inc_mgr.technician_email or 'modo simulación'}` (Total envíos: `{snapshot['email_dispatched_count']}`) |
+| **Alerta por Correo** | Enviada a `{inc_mgr.technician_email or 'modo simulación'}` |
 """
                 )
 

@@ -60,6 +60,15 @@ def test_full_closed_loop_incident_lifecycle_no_duplicate_emails(tmp_path):
     assert status_3["email_dispatched_count"] == 1
     assert len(sheets.fetch_incident_history()) == 1
 
+    # 3b. Simulating a full browser page reload (F5 -> brand new IncidentManager instance)
+    # must check persisted history and NOT send a duplicate email for the already-active incident!
+    reloaded_manager = IncidentManager(sheets_manager=sheets, output_dir=tmp_path)
+    status_reload = reloaded_manager.evaluate_telemetry(df_fault)
+    assert status_reload["state"] == TechnicianState.EMERGENCY_ASSIGNED
+    assert status_reload["incident_id"] == incident_id
+    assert status_reload["email_dispatched_count"] == 0
+    assert len(sheets.fetch_incident_history()) == 1
+
     # 4. Technician replies to email -> restores sheet, updates history status to RESUELTO, and normalizes platform
     resolution = manager.process_resolution(
         resolution_note="Conector MC4 reemplazado y coordinado con supervisor.",

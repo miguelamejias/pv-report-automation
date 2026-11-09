@@ -14,6 +14,10 @@ Coordinates the end-to-end lifecycle of a real-time solar plant incident:
                               Incident History updated to RESUELTO ->
                               Platform returns to normal operation.
 
+Includes persistent deduplication across page reloads: before dispatching an
+alert email, checks both in-memory state and the persisted `incident_history.csv`
+so reloading the web page never sends duplicate emails for an already-notified fault.
+
 Author: Miguel Ángel Mejía Sánchez
 """
 
@@ -82,6 +86,42 @@ class IncidentManager:
         )
         self._incident_counter: int = len(self.incident_history)
 
+        # Restore active incident state from persisted history if page was reloaded
+        open_inc = self._find_open_incident_in_history()
+        if open_inc:
+            self.state = TechnicianState.EMERGENCY_ASSIGNED
+            self.active_incident_id = str(open_inc.get("incident_id", ""))
+            self.active_created_at = str(open_inc.get("created_at", ""))
+            if open_inc.get("technician_name"):
+                self.technician_name = str(open_inc["technician_name"])
+            if open_inc.get("technician_email"):
+                self.technician_email = str(open_inc["technician_email"])
+            if open_inc.get("supervisor_name"):
+                self.supervisor_name = str(open_inc["supervisor_name"])
+            pdf_candidate = self.output_dir / f"incident_{self.active_incident_id}.pdf"
+            if pdf_candidate.exists():
+                self.active_pdf_path = pdf_candidate
+
+    def _find_open_incident_in_history(
+        self, panel_id: Optional[str] = None
+    ) -> Optional[dict]:
+        """Check persisted incident history for an already-notified open emergency."""
+        hist_df = self.sheets_manager.fetch_incident_history()
+        if hist_df.empty or "status" not in hist_df.columns:
+            return None
+        open_rows = hist_df[
+            hist_df["status"].astype(str).str.upper() == "EN EMERGENCIA ASIGNADA"
+        ]
+        if open_rows.empty:
+            return None
+        if panel_id and "panel_id" in open_rows.columns:
+            panel_match = open_rows[
+                open_rows["panel_id"].astype(str) == str(panel_id)
+            ]
+            if not panel_match.empty:
+                return panel_match.iloc[0].to_dict()
+        return open_rows.iloc[0].to_dict()
+
     def register_technician(
         self,
         name: str,
@@ -113,9 +153,19 @@ class IncidentManager:
             self.active_pdf_path = None
             return self._snapshot()
 
-        # Fault detected: only dispatch email and generate new incident_id on transition
-        if self.state != TechnicianState.EMERGENCY_ASSIGNED or not self.active_incident_id:
-            self._incident_counter += 1
+        primary = actionable[0]
+        panel_id = str(primary.details.get("panel_id", "PNL-B04-12"))
+
+        # Deduplication cycle: check both in-memory state and persisted incident_history.csv
+        existing_open = self._find_open_incident_in_history(panel_id=panel_id)
+        already_notified = (
+            getattr(self.state, "value", None)
+            == TechnicianState.EMERGENCY_ASSIGNED.value
+            and bool(self.active_incident_id)
+        ) or (existing_open is not None)
+
+        if not already_notified:
+            self._incident_counter = len(self.sheets_manager.fetch_incident_history()) + 1
             now_dt = datetime.now()
             now_str = now_dt.strftime("%Y%m%d-%H%M")
             self.active_incident_id = f"INC-{now_str}-{self._incident_counter:02d}"
@@ -141,13 +191,12 @@ class IncidentManager:
             )
             self.email_dispatched_count += 1
 
-            primary = actionable[0]
             active_record = {
                 "incident_id": self.active_incident_id,
                 "status": "EN EMERGENCIA ASIGNADA",
                 "created_at": self.active_created_at,
                 "resolved_at": "Pendiente",
-                "panel_id": primary.details.get("panel_id", "PNL-B04-12"),
+                "panel_id": panel_id,
                 "location_block": primary.details.get(
                     "location_block", "Bloque B - Fila 4 - Posicion 12"
                 ),
@@ -159,14 +208,31 @@ class IncidentManager:
             hist_df = self.sheets_manager.upsert_incident_record(active_record)
             self.incident_history = hist_df.to_dict("records")
         else:
-            # Update alert metrics in place without sending duplicate email
+            # Fault already notified: restore state from persisted history without sending duplicate email
+            self.state = TechnicianState.EMERGENCY_ASSIGNED
+            if existing_open and not self.active_incident_id:
+                self.active_incident_id = str(existing_open.get("incident_id", ""))
+                self.active_created_at = str(existing_open.get("created_at", ""))
             self.active_alerts = actionable
+            if self.active_incident_id:
+                pdf_candidate = (
+                    self.output_dir / f"incident_{self.active_incident_id}.pdf"
+                )
+                if pdf_candidate.exists():
+                    self.active_pdf_path = pdf_candidate
+            self.incident_history = (
+                self.sheets_manager.fetch_incident_history().to_dict("records")
+            )
 
         return self._snapshot()
 
     def poll_imap_for_resolution(self) -> Optional[dict]:
         """Check IMAP inbox if an incident is currently active; resolve automatically if reply arrived."""
-        if self.state != TechnicianState.EMERGENCY_ASSIGNED or not self.active_incident_id:
+        if (
+            getattr(self.state, "value", None)
+            != TechnicianState.EMERGENCY_ASSIGNED.value
+            or not self.active_incident_id
+        ):
             return None
 
         reply = self.imap_listener.check_for_resolution_reply(
@@ -186,16 +252,31 @@ class IncidentManager:
         resolved_by: str = "email_reply",
     ) -> dict:
         """Restore Google Sheets telemetry to nominal values and close the active incident."""
-        inc_id = self.active_incident_id or "INC-MANUAL"
-        created_at = self.active_created_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        existing_open = self._find_open_incident_in_history()
+        inc_id = (
+            self.active_incident_id
+            or (str(existing_open["incident_id"]) if existing_open else None)
+            or "INC-MANUAL"
+        )
+        created_at = (
+            self.active_created_at
+            or (str(existing_open["created_at"]) if existing_open else None)
+            or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        )
         primary = self.active_alerts[0] if self.active_alerts else None
         panel_id = (
-            primary.details.get("panel_id", "PNL-B04-12") if primary else "PNL-B04-12"
+            primary.details.get("panel_id")
+            if primary
+            else (existing_open.get("panel_id") if existing_open else "PNL-B04-12")
         )
         location_block = (
-            primary.details.get("location_block", "Bloque B - Fila 4 - Posicion 12")
+            primary.details.get("location_block")
             if primary
-            else "Bloque B - Fila 4 - Posicion 12"
+            else (
+                existing_open.get("location_block")
+                if existing_open
+                else "Bloque B - Fila 4 - Posicion 12"
+            )
         )
 
         self.sheets_manager.restore_nominal_values()
