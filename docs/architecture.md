@@ -1,59 +1,52 @@
-# System Architecture — `pv-report-automation`
+# System Architecture — `pv-report-automation v3.0`
 
-> Solar Plant Maintenance Intelligence Suite
+> Interactive Solar NOC & Closed-Loop Incident Platform
 
-## High-Level Architecture
+## High-Level Architecture (v3.0 Closed-Loop NOC)
 
-This system follows a **pipeline architecture** where data flows sequentially through specialized components. Each component is a standalone Python class following SOLID principles, making the system easily testable and extensible.
+The system combines a **SOLID data-processing pipeline** with a **closed-loop state machine (`IncidentManager`)** and **Streamlit web interface (`app.py`)** that synchronizes bidirectional telemetry and incident history with Google Sheets and Gmail (SMTP/TLS + IMAP/SSL).
 
 ```
-                    ┌──────────────────────────────────┐
-                    │         CSV Log Files             │
-                    │   (Inverter Data Loggers)         │
-                    └──────────────┬───────────────────┘
-                                   │
-                                   ▼
-                    ┌──────────────────────────────────┐
-                    │     SolarDataTransformer          │
-                    │     ─────────────────────         │
-                    │  • Parse timestamps (UTC-5)       │
-                    │  • Clean NaN / negative values    │
-                    │  • Decode hex status codes        │
-                    │  • Compute: ΔV, PR, efficiency    │
-                    └──────────────┬───────────────────┘
-                                   │
-                              pd.DataFrame
-                                   │
-                                   ▼
-                    ┌──────────────────────────────────┐
-                    │         AnomalyEngine             │
-                    │     ─────────────────────         │
-                    │  Strategy Pattern (GoF):          │
-                    │  ├─ SoilingDetector               │
-                    │  ├─ ClippingDetector              │
-                    │  └─ IsolationFaultDetector        │
-                    └──────────────┬───────────────────┘
-                                   │
-                           list[Alert]
-                                   │
-                        ┌──────────┴──────────┐
-                        │                     │
-                        ▼                     ▼
-         ┌─────────────────────┐  ┌──────────────────────┐
-         │   ReportGenerator   │  │NotificationOrchestrator│
-         │   ───────────────   │  │────────────────────── │
-         │  • PDF (FPDF2)      │  │ Routing by severity:  │
-         │  • HTML (Plotly)    │  │ ├─ CRITICAL → Email+  │
-         │  • Summary stats    │  │ │              Slack   │
-         │  • CO₂ calculation  │  │ ├─ WARNING → Both     │
-         └─────────┬───────────┘  │ └─ INFO → Slack only  │
-                   │              └──────────────────────┘
-                   ▼
-         ┌─────────────────────┐
-         │   output/           │
-         │   ├─ report.pdf     │
-         │   └─ report.html    │
-         └─────────────────────┘
+   ┌──────────────────────────────────────────────────────────────┐
+   │        Google Sheets (Drive) / live_telemetry.csv            │
+   │  (Panel ID, Block/Row/Pos, GPS Lat/Lon, V_DC, Temp, Status)  │
+   └──────────────────────────────┬───────────────────────────────┘
+                                  │
+                                  ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │             GoogleSheetsManager (src/sheets_manager.py)      │
+   │  • Live CSV export fetch + gspread Service Account sync      │
+   │  • Fault injection & nominal telemetry restoration           │
+   │  • Persistent Incident History (incident_history.csv / Tab)  │
+   └──────────────────────────────┬───────────────────────────────┘
+                                  │
+                                  ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │             SolarDataTransformer (src/transformer.py)        │
+   │  • Timestamp parsing (UTC-5) & NaN/negative value cleaning   │
+   │  • Panel geolocation preservation & hex status decoding      │
+   │  • Derived KPIs: ΔV_DC %, Performance Ratio, Efficiency      │
+   └──────────────────────────────┬───────────────────────────────┘
+                                  │
+                                  ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │               AnomalyEngine (src/anomaly_engine.py)          │
+   │  Strategy Pattern (4 Detectors):                             │
+   │  ├─ InstantPanelFaultDetector (Panel/Block/GPS fault logic)  │
+   │  ├─ IsolationFaultDetector                                   │
+   │  ├─ ClippingDetector                                         │
+   │  └─ SoilingDetector                                          │
+   └──────────────────────────────┬───────────────────────────────┘
+                                  │
+                                  ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │            IncidentManager (src/incident_manager.py)         │
+   │  State Machine: AVAILABLE (🟢) ➔ EMERGENCY (🔴) ➔ RESOLVED   │
+   │  • Persistent Reload Deduplication (_find_open_incident)     │
+   │  ├─► ReportGenerator.generate_incident_pdf() (Work Order)    │
+   │  ├─► NotificationOrchestrator.send_incident_alert() (SMTP)   │
+   │  └─◄ IMAPListener.check_for_resolution_reply() (IMAP SSL)    │
+   └──────────────────────────────────────────────────────────────┘
 ```
 
 ## Design Principles Applied
@@ -62,41 +55,17 @@ This system follows a **pipeline architecture** where data flows sequentially th
 
 | Principle | Application |
 |:--|:--|
-| **Single Responsibility** | Each class has one job: transform, detect, report, or notify. |
-| **Open/Closed** | New anomaly detectors can be added without modifying `AnomalyEngine`. |
-| **Liskov Substitution** | All detectors implement the `AnomalyDetector` Protocol. |
-| **Interface Segregation** | `AnomalyDetector` defines only the `detect()` method — nothing more. |
-| **Dependency Inversion** | `AnomalyEngine` depends on the `AnomalyDetector` abstraction, not concrete classes. |
+| **Single Responsibility** | Each module has one responsibility: `transformer` (ETL), `anomaly_engine` (detection), `report_generator` (PDF/HTML), `notifications` (outbound SMTP/Slack), `imap_listener` (inbound IMAP), `sheets_manager` (persistence), `incident_manager` (state machine). |
+| **Open/Closed** | New anomaly detectors can be registered in `AnomalyEngine` without modifying existing engine logic. |
+| **Liskov Substitution** | All 4 detectors implement the `AnomalyDetector` Protocol (`detect(df) -> list[Alert]`). |
+| **Interface Segregation** | `AnomalyDetector` requires only `detect()`. |
+| **Dependency Inversion** | `IncidentManager` accepts injectable `GoogleSheetsManager`, `NotificationOrchestrator`, and `IMAPListener` instances. |
 
-### Design Patterns
+### Key Technical Mechanisms in v3.0
 
-| Pattern | Where Used | Why |
-|:--|:--|:--|
-| **Strategy** | `AnomalyEngine` + detectors | Swap detection rules at runtime without touching the engine. |
-| **Factory Method** | `AnomalyEngine.create_default()` | Pre-configure the engine with all built-in detectors. |
-| **Mediator** | `NotificationOrchestrator` | Centralizes routing decisions between Email and Slack channels. |
-| **Pipeline** | `SolarDataTransformer` method chain | Data flows through sequential transformation steps. |
-
-## Module Dependency Map
-
-```
-main.py
-  ├── src/transformer.py        (pandas, numpy)
-  ├── src/anomaly_engine.py      (pandas, numpy)
-  ├── src/report_generator.py   (plotly, fpdf2, pandas)
-  └── src/notifications.py      (smtplib, ssl, json, urllib)
-```
-
-## Key Technical Decisions
-
-1. **Why Protocol over ABC?**
-   Python's `Protocol` (PEP 544) enables structural typing — any class with a `detect()` method works, without explicit inheritance.  This is more Pythonic and flexible.
-
-2. **Why FPDF2 over ReportLab?**
-   FPDF2 is lightweight (no C dependencies), simpler API, and sufficient for our use case.  ReportLab is heavier and better suited for complex typesetting.
-
-3. **Why Plotly over Matplotlib?**
-   Plotly generates self-contained HTML files with interactive zoom, hover, and pan. Recruiters can open the report in any browser without installing Python.
-
-4. **Why not a database?**
-   CSV is the universal format exported by inverter data loggers (SMA, Huawei, Fronius). Using CSV keeps the system compatible with real field equipment.
+1. **Persistent Reload Deduplication (`IncidentManager._find_open_incident_in_history`):**
+   Streamlit re-runs `app.py` on user interactions and creates a fresh session on full browser reloads (`F5`). Before generating a new incident ID or sending an email, `IncidentManager` checks both in-memory state and `sample_data/incident_history.csv` for an existing record in state `EN EMERGENCIA ASIGNADA`. If found, it restores the active incident without re-sending any email.
+2. **Closed-Loop Resolution via Email Reply (`IMAPListener`):**
+   Searches `INBOX` over `IMAP4_SSL` (`imap.gmail.com:993`) for unseen or recent replies matching `[INC-XXXX]`, strips quoted reply history, restores healthy panel parameters in `GoogleSheetsManager`, and updates the incident record from `EN EMERGENCIA ASIGNADA` to `RESUELTO`.
+3. **Aerial + GPS Plant Layout (`app.py`):**
+   Combines a top panoramic aerial reference banner (`assets/solar_plant_banner.jpg`) with an interactive Plotly scatter map overlaid on `assets/solar_plant_aerial.jpg`, followed by a single full-width editable telemetry table and real-time incident history table.

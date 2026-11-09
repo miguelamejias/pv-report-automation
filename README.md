@@ -1,27 +1,30 @@
 <div align="center">
 
-# ⚡ pv-report-automation
+# ⚡ pv-report-automation v3.0
 
-**Solar Plant Maintenance Intelligence Suite**
+**Interactive Solar NOC & Closed-Loop Incident Platform**
 
-*Automatización de reportes de mantenimiento para sistemas fotovoltaicos.*
+*Centro de Control Fotovoltaico Interactivo, Sincronización con Google Sheets y Ciclo Cerrado de Incidentes por Correo (SMTP / IMAP).*
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](https://github.com/features/actions)
+[![Streamlit](https://img.shields.io/badge/Streamlit-NOC%20v3.0-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](app.py)
+[![Tests](https://img.shields.io/badge/Tests-49%20Passed-2ECC71?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
+[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](https://github.com/miguelamejias/pv-report-automation/actions)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](Dockerfile)
-[![Code Style](https://img.shields.io/badge/Code%20Style-PEP8-000000?style=for-the-badge)](https://peps.python.org/pep-0008/)
 
-Script en Python que procesa logs de rendimiento de inversores solares, detecta anomalías mediante reglas de negocio industriales, genera reportes ejecutivos (PDF + HTML interactivo) y envía alertas automáticas multi-canal (Email + Slack).
-
-**Actualizado con IA** para mejorar código, modularidad y funcionalidad.
+Plataforma en Python + Streamlit que conecta telemetría en vivo desde **Google Sheets / CSV**, visualiza la ubicación física GPS sobre el **Parque Solar Sabana Norte**, detecta anomalías por panel en tiempo real, emite **Órdenes de Trabajo en PDF** por correo electrónico al técnico en turno con deduplicación anti-spam y normaliza automáticamente la planta cuando el técnico responde el correo (`IMAP SSL`).
 
 [Instalación](#-instalación) •
-[Uso](#-uso-rápido) •
+[Plataforma Web NOC v3.0](#-plataforma-web-interactiva-noc-v30) •
 [Arquitectura](#-arquitectura) •
-[Documentación](#-documentación)
+[Testing](#-testing)
 
 </div>
+
+---
+
+![Vista Aérea Parque Solar Sabana Norte](assets/solar_plant_banner.jpg)
 
 ---
 
@@ -31,47 +34,79 @@ Script en Python que procesa logs de rendimiento de inversores solares, detecta 
 
 | Métrica | Resultado |
 |:--|:--|
-| **Optimización del MTTR** | Reducción del tiempo promedio de reparación en un **40%** al identificar la causa raíz (sombreado vs. falla de hardware) antes de enviar a la cuadrilla técnica. |
+| **Optimización del MTTR** | Reducción del tiempo promedio de reparación en un **40%** al identificar la causa raíz y la coordenada exacta del panel (`Bloque / Fila / Posición`) antes de desplazar a la cuadrilla técnica. |
 | **Eficiencia Operativa** | Automatización del proceso de consolidación de logs de 15 plantas solares, pasando de **4 horas de trabajo manual a 45 segundos** de procesamiento automatizado. |
-| **Disponibilidad del Sistema** | Mejora de la disponibilidad global de energía en un **12%** mediante la detección temprana de micro-cortes en inversores de cadena. |
+| **Disponibilidad del Sistema** | Mejora de la disponibilidad global de energía en un **12%** mediante detección temprana y cierre de ciclo automático con el técnico de campo. |
 
 ---
 
-## 🤖 Actualizado con IA — Historia de Evolución
+## 🤖 Evolución del Proyecto (v1.0 → v2.0 → v3.0)
 
-Este repositorio es la **versión 2.0** de un script que usaba diariamente en **ENERTEC LATINOAMÉRICA** para procesar logs de inversores. La versión original era un script monolítico de ~200 líneas que:
-
-- Leía un CSV con `pandas`
-- Calculaba promedios básicos
-- Imprimía resultados en consola
-
-**Con asistencia de IA, se transformó en:**
-
-| Aspecto | v1.0 (Original) | v2.0 (Con IA) |
-|:--|:--|:--|
-| Arquitectura | Script monolítico | POO con SOLID + Strategy Pattern |
-| Anomalías | Límites hardcodeados | 3 detectores especializados con métricas industriales |
-| Reportes | `print()` en consola | PDF ejecutivo + HTML interactivo (Plotly) |
-| Alertas | Ninguna | Multi-canal (Email SMTP/TLS + Slack Webhook) |
-| Testing | Ninguno | pytest con cobertura (12 tests) |
-| CI/CD | Ninguno | GitHub Actions automático |
-| Despliegue | `python script.py` | Docker con HEALTHCHECK |
-| Documentación | Ninguna | README, arquitectura, diagramas de flujo |
-
-> La IA no reemplaza la experiencia de campo — la amplifica. Cada regla de negocio (soiling, clipping, isolation fault) viene de situaciones reales que viví como técnico.
+| Aspecto | v1.0 (Original) | v2.0 (Pipeline CLI) | v3.0 (Interactive Solar NOC) |
+|:--|:--|:--|:--|
+| **Interfaz** | Consola básica | CLI (`main.py`) | **Aplicación Web Interactiva (`app.py` en Streamlit)** + CLI |
+| **Fuente de Datos** | CSV estático | CSV local | **Google Sheets compartido en vivo** + espejo CSV local |
+| **Geolocalización** | Sin ubicación por panel | Nivel inversor general | **Coordenadas GPS por panel (`PNL-B04-12`) + Vista Aérea del Parque Solar** |
+| **Anomalías** | Límites fijos | 3 detectores por serie | **4 detectores** (incluye `InstantPanelFaultDetector` diurno/nocturno) |
+| **Órdenes de Trabajo** | `print()` | Reporte general PDF/HTML | **Orden de Trabajo de Incidente (`incident_INC-XXXX.pdf`) con EPP/herramientas** |
+| **Flujo de Alertas** | Ninguno | SMTP unidireccional | **Ciclo Cerrado 360° (Envío SMTP + Deduplicación + Lectura de Respuesta IMAP)** |
+| **Auditoría** | Ninguna | Logs de consola | **Historial de Incidentes en Google Sheets (`EN EMERGENCIA ASIGNADA` → `RESUELTO`)** |
+| **Testing** | Ninguno | 30 tests unitarios | **49 tests automatizados con `pytest` (>80% cobertura)** |
 
 ---
 
-## 📊 ¿Qué Detecta?
+## 🖥️ Plataforma Web Interactiva NOC v3.0
 
-### 1. Soiling (Suciedad en Paneles)
-Detecta caída progresiva del **Performance Ratio** (>1%/día durante 5 días consecutivos). Evita enviar cuadrillas innecesariamente — solo cuando el patrón confirma suciedad real.
+Lanza el Centro de Control e Incidentes en tu navegador:
 
-### 2. Inverter Clipping
-Identifica cuando la potencia AC se mantiene plana mientras la irradiación sigue subiendo. Señal de que el inversor alcanzó su límite térmico o de diseño.
+```bash
+python -m streamlit run app.py
+```
 
-### 3. Isolation Fault (Falla de Aislamiento)
-Si el voltaje DC entre strings difiere más del **15%** por más de 15 minutos, se dispara alerta **CRÍTICA** de revisión de cableado y conectores MC4.
+### Diseño Visual y Módulos de la Interfaz (`app.py`)
+
+1. **⚙️ Menú de Configuración Desplegable:**
+   - Ubicado en la parte superior y contraído por defecto para no saturar la pantalla.
+   - Permite registrar al **Técnico en Turno (Reclutador)** con su nombre y correo real, enlazar la hoja de **Google Sheets (Drive)**, descargar las plantillas CSV y configurar las credenciales **SMTP / IMAP** de Gmail.
+2. **🎛️ Consola Rápida de Operación:**
+   - Barra de herramientas limpia y bordeada con botones para sincronizar Google Sheets/IMAP, simular un sabotaje en 1 clic sobre el panel `PNL-B04-12` o restaurar la planta.
+3. **🛰️ Vista Aérea y Mapa Físico de Paneles Solares — Planta Sabana Norte (GPS):**
+   - Banner panorámico aéreo del parque solar acompañado del mapa interactivo GPS (con la ortofoto del parque solar integrada como capa base y sin barras flotantes que estorben la lectura).
+   - Los paneles operativos se muestran en verde (`🟢 OPERATIVO`) y los paneles en falla se resaltan en rojo (`🔴 FALLA CRÍTICA`).
+4. **📋 Tabla de Telemetría en Vivo (Un Solo Espacio de Ancho Completo):**
+   - Situada debajo del mapa físico ocupando el 100% del ancho para visualizar y editar cómodamente voltajes DC (`v_dc_string_1`, `v_dc_string_2`), temperatura de disipador (`temp_heatsink`), irradiancia (`irradiance_poa`) y código de estado (`status_code`).
+5. **📜 Historial de Incidentes en Google Sheets (Estado Actual en Tiempo Real):**
+   - Registra automáticamente cada incidente en `sample_data/incident_history.csv` y en la pestaña `Historial_Incidentes` de Google Sheets.
+   - Muestra en tiempo real si el incidente está **`EN EMERGENCIA ASIGNADA`** o **`RESUELTO`**, junto con la nota de cierre enviada por el técnico.
+6. **🔒 Ciclo de Deduplicación Anti-Spam:**
+   - Antes de emitir un correo, `IncidentManager` verifica tanto la memoria como `incident_history.csv`. Recargar la página (`F5`) nunca reenvía correos duplicados para una falla que ya fue notificada.
+
+---
+
+## 🔄 Flujo de Demostración en Vivo (Para Entrevistas Técnicas)
+
+1. **Registro Inicial:** Al iniciar la entrevista, el reclutador abre el **Menú de Configuración Desplegable** y se registra como **Técnico en Turno** con su correo electrónico. El estado muestra `🟢 DISPONIBLE — PLANTA OPERANDO AL 100%`.
+2. **Inyección de Falla en Google Sheets o Tabla en Vivo:** El reclutador edita una fila en la tabla (o presiona el botón **⚡ Simular Sabotaje en Panel PNL-B04-12**).
+3. **Detección, Orden de Trabajo PDF y Correo de Emergencia:**
+   - La plataforma cambia a `🔴 ESTADO DEL TÉCNICO: EN EMERGENCIA ASIGNADA [INC-XXXX]`.
+   - Se registra el incidente en el **Historial de Incidentes** con estado `EN EMERGENCIA ASIGNADA`.
+   - El técnico recibe en su bandeja de entrada un correo con la **Orden de Trabajo PDF (`incident_INC-XXXX.pdf`)** adjunta, la ubicación exacta (`Bloque B - Fila 4 - Posicion 12`, coordenadas GPS) y el protocolo obligatorio: **preparar herramientas/EPP y comunicarse con su supervisor (`Ing. Miguel Ángel Mejía Sánchez`)**.
+4. **Cierre del Incidente por Respuesta de Correo (`Reply`):**
+   - El reclutador responde al correo recibido confirmando que atendió la emergencia en campo.
+   - Al presionar **🔄 Sincronizar Google Sheets / Buzón IMAP** (o procesar la respuesta en consola), `IMAPListener` detecta la respuesta, `GoogleSheetsManager` restaura los valores nominales del panel, actualiza el historial a **`RESUELTO`** y la plataforma regresa a `🟢 DISPONIBLE — SISTEMA NORMALIZADO AL 100%`.
+
+---
+
+## 📊 ¿Qué Anomalías Detecta el Motor (`src/anomaly_engine.py`)?
+
+1. **Instant Panel Fault (`InstantPanelFaultDetector` — Nuevo en v3.0):**
+   - Detecta en tiempo real desequilibrios severos de voltaje entre strings ($\Delta V_{DC} > 15\%$), sobretemperatura en disipador ($T > 75\,^\circ\text{C}$ / crítico $> 85\,^\circ\text{C}$) o códigos de falla de hardware (`status_code != 0x00`, incluyendo `0x05` y `0xFF`) tanto de día como de noche, extrayendo `panel_id`, `location_block` y coordenadas GPS.
+2. **Isolation Fault (`IsolationFaultDetector`):**
+   - Detecta diferencias sostenidas de voltaje DC entre strings ($>15\%$ por más de 15 minutos) asociadas a degradación de aislamiento o conectores MC4.
+3. **Inverter Clipping (`ClippingDetector`):**
+   - Identifica saturación de potencia AC diaria bajo alta irradiación ($>800\,\text{W/m}^2$).
+4. **Soiling (`SoilingDetector`):**
+   - Detecta caída progresiva del **Performance Ratio** ($>1\%/\text{día}$ durante 5 días consecutivos) por acumulación de polvo o suciedad.
 
 ---
 
@@ -81,187 +116,76 @@ Si el voltaje DC entre strings difiere más del **15%** por más de 15 minutos, 
 pv-report-automation/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                 # CI/CD con GitHub Actions
+│       └── ci.yml                  # Pipeline CI/CD con GitHub Actions
+├── assets/
+│   ├── solar_plant_aerial.jpg      # Ortofoto aérea de Planta Solar Sabana Norte
+│   └── solar_plant_banner.jpg      # Banner panorámico de apoyo visual sobre el mapa GPS
 ├── src/
-│   ├── __init__.py                # Metadata del paquete
-│   ├── transformer.py             # SolarDataTransformer (ETL)
-│   ├── anomaly_engine.py          # AnomalyEngine + Strategy Pattern
-│   ├── report_generator.py        # PDF (FPDF2) + HTML (Plotly)
-│   └── notifications.py           # Email SMTP/TLS + Slack Webhook
+│   ├── __init__.py                 # Versión del paquete (3.0.0)
+│   ├── transformer.py              # SolarDataTransformer (ETL + geolocalización por panel)
+│   ├── anomaly_engine.py           # AnomalyEngine + 4 detectores (Strategy Pattern)
+│   ├── report_generator.py         # Reportes ejecutivos + Orden de Trabajo PDF de incidente
+│   ├── notifications.py            # SMTP/TLS (Alertas + Orden PDF adjunta) + Slack Webhook
+│   ├── sheets_manager.py           # Sincronización Google Sheets + Telemetría + Historial
+│   ├── imap_listener.py            # Lector IMAP SSL de respuestas de correo del técnico
+│   └── incident_manager.py         # Máquina de estados NOC + Deduplicación persistente
 ├── tests/
-│   ├── test_transformer.py        # Tests ETL (12 casos)
-│   ├── test_anomaly_engine.py     # Tests detección (8 casos)
-│   └── test_notifications.py      # Tests notificaciones (10 casos)
+│   ├── test_transformer.py         # Tests ETL y geolocalización
+│   ├── test_anomaly_engine.py      # Tests de los 4 detectores de anomalías
+│   ├── test_report_generator.py    # Tests de generación PDF/HTML y Órdenes de Trabajo
+│   ├── test_notifications.py       # Tests de alertas SMTP/Slack
+│   ├── test_sheets_manager.py      # Tests de telemetría e historial en Google Sheets/CSV
+│   └── test_incident_loop.py       # Tests de ciclo cerrado IMAP, mapa GPS y deduplicación
 ├── sample_data/
-│   └── plant_log_2024.csv         # 399 registros realistas con anomalías
+│   ├── live_telemetry.csv          # Espejo local de telemetría en vivo (12 paneles con GPS)
+│   ├── incident_history.csv        # Registro persistente del historial de incidentes
+│   └── plant_log_2024.csv          # Dataset histórico de 399 registros
 ├── docs/
-│   ├── architecture.md            # Arquitectura SOLID + patrones
-│   └── flowchart.md               # Diagramas de flujo (Mermaid)
-├── output/                        # Reportes generados (gitignored)
-├── main.py                        # Punto de entrada CLI
-├── config.example.py              # Template de credenciales
-├── generate_sample_data.py        # Generador de datos de prueba
-├── requirements.txt               # Dependencias Python
-├── Dockerfile                     # Contenedor Docker listo
-├── .gitignore
-├── LICENSE                        # MIT
+│   ├── architecture.md             # Arquitectura SOLID y flujo cerrado v3.0
+│   └── flowchart.md                # Diagramas Mermaid
+├── app.py                          # Aplicación Web Interactiva Streamlit (NOC v3.0)
+├── main.py                         # Punto de entrada CLI tradicional
+├── config.example.py               # Plantilla de configuración (SMTP, IMAP, Google Sheets)
+├── requirements.txt                # Dependencias Python
+├── Dockerfile                      # Contenedor Docker listo para producción
 └── README.md
 ```
 
 ---
 
-## 🚀 Instalación
+## 🚀 Instalación y Configuración
 
-### Requisitos Previos
-- Python 3.9 o superior
-- pip (gestor de paquetes)
-
-### Pasos
+### 1. Clonar e instalar dependencias
 
 ```bash
-# 1. Clonar el repositorio
-git clone https://github.com/tu-usuario/pv-report-automation.git
+git clone https://github.com/miguelamejias/pv-report-automation.git
 cd pv-report-automation
-
-# 2. Crear entorno virtual (recomendado)
 python -m venv venv
-source venv/bin/activate        # Linux/Mac
-# venv\Scripts\activate         # Windows
+# En Windows:
+venv\Scripts\activate
+# En Linux/Mac:
+# source venv/bin/activate
 
-# 3. Instalar dependencias
 pip install -r requirements.txt
+```
 
-# 4. (Opcional) Configurar credenciales para alertas reales
+### 2. Configurar Correo Real Gmail (App Password) y Google Sheets
+
+Copia la plantilla [`config.example.py`](config.example.py) a `config.py` (ignorado por Git para proteger tus claves):
+
+```bash
 cp config.example.py config.py
-# Editar config.py con tus credenciales SMTP y Slack
 ```
 
-### Docker
+Para usar tu cuenta de Gmail en el envío y recepción automática de incidentes:
+1. Activa la **Verificación en 2 pasos** en tu cuenta de Google.
+2. Genera una **Contraseña de Aplicación** de 16 letras en https://myaccount.google.com/apppasswords.
+3. Coloca tu correo y la clave de 16 letras en `config.py` (o directamente en el **Menú de Configuración Desplegable** dentro de la app):
 
-```bash
-# Construir la imagen
-docker build -t pv-report-automation .
-
-# Ejecutar con volumen para obtener los reportes
-docker run --rm -v $(pwd)/output:/app/output pv-report-automation
-```
-
----
-
-## ⚡ Uso Rápido
-
-### 🖥️ Plataforma Web Interactiva NOC v3.0 (Recomendado para Demos en Vivo)
-
-Lanza el Centro de Operaciones de Red (NOC) interactivo en tu navegador:
-
-```bash
-streamlit run app.py
-```
-
-**Flujo de prueba interactiva para Reclutadores (Ciclo 360°):**
-1. **Registro como Técnico en Turno:** El reclutador ingresa su nombre y su correo electrónico en la barra lateral. Su estado aparece como `🟢 DISPONIBLE — Planta al 100%`.
-2. **Sabotaje en Vivo (Google Sheets / Tabla de Telemetría):** Desde el Google Sheet compartido en Drive (o en la tabla interactiva de la plataforma), se modifica el voltaje o temperatura de un panel (ej. `PNL-B04-12` en `Bloque B - Fila 4 - Posición 12`).
-3. **Asignación de Emergencia y Alerta por Correo:**
-   - El estado del técnico cambia automáticamente a `🔴 EMERGENCIA ASIGNADA [INC-XXXX]`.
-   - El mapa GPS resalta el panel dañado y genera la **Orden de Trabajo en PDF**.
-   - Llega un correo electrónico real al reclutador indicando la ubicación del panel y las instrucciones: **preparar herramientas/EPP y comunicarse con su supervisor (`Ing. Miguel Ángel Mejía Sánchez`)**.
-4. **Resolución Respondiendo al Correo (`Reply`):** El reclutador responde al correo dando aviso de que atendió la emergencia; el sistema lee la respuesta vía `IMAP SSL`, restaura los valores nominales en la hoja de cálculo y devuelve la plataforma a `🟢 SISTEMA NORMALIZADO AL 100%`.
-
----
-
-### 💻 Procesamiento por Consola CLI (modo simulación)
-
-```bash
-python main.py
-```
-
-### Con archivo personalizado
-
-```bash
-python main.py --input data/mi_planta.csv --plant "Solar Bogotá Norte" --power 15.0
-```
-
-### Con notificaciones reales (requiere config.py)
-
-```bash
-python main.py --input data/mi_planta.csv --notify
-```
-
-### Opciones disponibles
-
-```
---input    Ruta al archivo CSV (default: sample_data/plant_log_2024.csv)
---output   Directorio de reportes (default: output/)
---plant    Nombre de la planta (default: ENERTEC Solar Plant)
---power    Capacidad nominal en kW (default: 10.0)
---notify   Activar notificaciones reales (Email + Slack)
---verbose  Logging detallado (debug)
-```
-
----
-
-## 📄 Ejemplo de Output
-
-### Ejecución de consola
-
-```
-============================================================
-  ⚡ pv-report-automation v2.0.0
-  Solar Plant Maintenance Intelligence Suite
-  ENERTEC LATINOAMÉRICA
-============================================================
-
-  ✅ Loaded 399 records from sample_data/plant_log_2024.csv
-
-  🔍 Anomaly Engine: 3 detectors registered
-  ⚠️  Alerts found: 2
-     🔴 [CRITICAL] Isolation Fault: String voltage mismatch detected...
-     🟡 [WARNING] Soiling Detection: Performance Ratio has declined...
-
-  📊 Summary Statistics:
-     Energy Generated : 187.43 kWh
-     CO₂ Avoided      : 23.62 kg
-     Avg PR           : 79.3%
-     Peak Power       : 9214.0 W
-     Max Temperature  : 52.8°C
-
-  📄 HTML Report: output/report.html
-  📄 PDF Report:  output/report.pdf
-
-============================================================
-  ✅ Pipeline complete!
-============================================================
-```
-
-### Email de Alerta Simulada
-
-```
-============================================================
-⚡ SIMULATED ALERT DISPATCH — pv-report-automation v2.0
-============================================================
-
-  Alert #1
-  🔴 Severity : CRITICAL
-  📋 Rule     : Isolation Fault
-  💬 Message  : String voltage mismatch detected: avg ΔV = 25.1%
-                (threshold: 15.0%) for 180 minutes.
-                Immediate wiring inspection required.
-  🕐 Start    : 2024-03-16 10:00:00-05:00
-  🕐 End      : 2024-03-16 13:00:00-05:00
-
-  Alert #2
-  🟡 Severity : WARNING
-  📋 Rule     : Soiling Detection
-  💬 Message  : Performance Ratio has declined for 5 consecutive
-                days (avg drop: -1.15%/day).
-                Panel cleaning is recommended.
-  🕐 Start    : 2024-03-13 00:00:00
-  🕐 End      : 2024-03-17 00:00:00
-
-  Total Alerts: 2
-  Channels: Slack ✅ | Email ✅ (simulated)
-
-============================================================
+```python
+SENDER_EMAIL = "tu_correo@gmail.com"
+SENDER_PASSWORD = "xxxx xxxx xxxx xxxx"  # Clave de aplicación de 16 caracteres
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/TU_SHEET_ID/edit?usp=sharing"
 ```
 
 ---
@@ -269,82 +193,20 @@ python main.py --input data/mi_planta.csv --notify
 ## 🧪 Testing
 
 ```bash
-# Ejecutar todos los tests
-pytest tests/ -v
+# Ejecutar las 49 pruebas automatizadas
+python -m pytest tests/ -v
 
-# Con reporte de cobertura
-pytest tests/ -v --cov=src --cov-report=term-missing
+# Ejecutar con reporte de cobertura
+python -m pytest tests/ -v --cov=src --cov-report=term-missing
 ```
 
 ---
 
-## 🏗️ Arquitectura
-
-El sistema implementa principios **SOLID** y patrones de diseño **GoF**:
-
-```
-main.py (Orchestration)
-  │
-  ├── SolarDataTransformer      Pipeline    ETL → Clean DataFrame
-  │
-  ├── AnomalyEngine             Strategy    3 detectores intercambiables
-  │   ├── SoilingDetector
-  │   ├── ClippingDetector
-  │   └── IsolationFaultDetector
-  │
-  ├── ReportGenerator           Builder     PDF + HTML reports
-  │
-  └── NotificationOrchestrator  Mediator    Email + Slack routing
-```
-
-Documentación completa en [`docs/architecture.md`](docs/architecture.md) y [`docs/flowchart.md`](docs/flowchart.md).
-
----
-
-## 📚 Documentación
-
-| Documento | Descripción |
-|:--|:--|
-| [`docs/architecture.md`](docs/architecture.md) | Arquitectura SOLID, patrones de diseño, decisiones técnicas |
-| [`docs/flowchart.md`](docs/flowchart.md) | Diagramas de flujo del pipeline (Mermaid) |
-| [`config.example.py`](config.example.py) | Template de configuración de credenciales |
-
----
-
-## 🛠️ Stack Tecnológico
-
-| Herramienta | Uso |
-|:--|:--|
-| **Python 3.9+** | Lenguaje principal |
-| **Pandas** | Procesamiento y análisis de datos |
-| **NumPy** | Operaciones numéricas |
-| **Plotly** | Gráficos interactivos HTML |
-| **FPDF2** | Generación de reportes PDF |
-| **pytest** | Testing automatizado |
-| **Docker** | Contenedorización |
-| **GitHub Actions** | CI/CD automatizado |
-
----
-
-## 🤔 ¿Por Qué Este Proyecto Importa?
-
-1. **Problema real:** No es un TODO app o un proyecto de tutorial. Es una herramienta que resolvía un problema diario en una empresa de energía solar.
-
-2. **Código de producción:** POO con SOLID, testing, CI/CD, Docker. No es un notebook de Jupyter — es software mantenible.
-
-3. **Impacto medible:** 4 horas → 45 segundos. 40% menos en MTTR. 12% más de disponibilidad.
-
-4. **Evolución visible:** La historia de v1.0 a v2.0 demuestra capacidad de aprendizaje continuo y adopción de mejores prácticas.
-
-5. **Conocimiento de dominio:** Las reglas de negocio (PR, soiling, clipping, isolation fault) demuestran experiencia real en energía solar, no solo habilidad en programación.
-
----
-
-## 📫 Contacto
+## 📫 Autor y Contacto
 
 **Miguel Ángel Mejía Sánchez**
-- Profesional IT | 9 años de experiencia
-- Soporte técnico & Automatización | ENERTEC LATINOAMÉRICA
+- Profesional IT & Automatización | 9 años de experiencia
+- Soporte Técnico y Operaciones Fotovoltaicas | ENERTEC LATINOAMÉRICA
 - Colombia 🇨🇴
 
 ---
