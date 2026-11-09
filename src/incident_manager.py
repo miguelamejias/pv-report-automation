@@ -7,9 +7,11 @@ Coordinates the end-to-end lifecycle of a real-time solar plant incident:
   1. AVAILABLE (🟢)         : Technician registered, telemetry nominal.
   2. EMERGENCY_ASSIGNED (🔴): Anomaly detected in Google Sheets -> Work Order
                               PDF generated -> Single alert email sent to
-                              on-duty technician.
+                              on-duty technician -> Logged in Incident History
+                              as EN EMERGENCIA ASIGNADA.
   3. RESOLVED (🟢)          : Technician replies to the alert email ->
                               Google Sheets restored to nominal values ->
+                              Incident History updated to RESUELTO ->
                               Platform returns to normal operation.
 
 Author: Miguel Ángel Mejía Sánchez
@@ -70,12 +72,15 @@ class IncidentManager:
         self.supervisor_name: str = "Ing. Miguel Ángel Mejía Sánchez"
 
         self.active_incident_id: Optional[str] = None
+        self.active_created_at: Optional[str] = None
         self.active_alerts: list[Alert] = []
         self.active_pdf_path: Optional[Path] = None
         self.email_dispatched_count: int = 0
         self.last_email_result: Optional[dict] = None
-        self.incident_history: list[dict] = []
-        self._incident_counter: int = 0
+        self.incident_history: list[dict] = (
+            self.sheets_manager.fetch_incident_history().to_dict("records")
+        )
+        self._incident_counter: int = len(self.incident_history)
 
     def register_technician(
         self,
@@ -103,6 +108,7 @@ class IncidentManager:
         if not actionable:
             self.state = TechnicianState.AVAILABLE
             self.active_incident_id = None
+            self.active_created_at = None
             self.active_alerts = []
             self.active_pdf_path = None
             return self._snapshot()
@@ -110,8 +116,10 @@ class IncidentManager:
         # Fault detected: only dispatch email and generate new incident_id on transition
         if self.state != TechnicianState.EMERGENCY_ASSIGNED or not self.active_incident_id:
             self._incident_counter += 1
-            now_str = datetime.now().strftime("%Y%m%d-%H%M")
+            now_dt = datetime.now()
+            now_str = now_dt.strftime("%Y%m%d-%H%M")
             self.active_incident_id = f"INC-{now_str}-{self._incident_counter:02d}"
+            self.active_created_at = now_dt.strftime("%Y-%m-%d %H:%M:%S")
             self.state = TechnicianState.EMERGENCY_ASSIGNED
             self.active_alerts = actionable
 
@@ -132,6 +140,24 @@ class IncidentManager:
                 pdf_path=self.active_pdf_path,
             )
             self.email_dispatched_count += 1
+
+            primary = actionable[0]
+            active_record = {
+                "incident_id": self.active_incident_id,
+                "status": "EN EMERGENCIA ASIGNADA",
+                "created_at": self.active_created_at,
+                "resolved_at": "Pendiente",
+                "panel_id": primary.details.get("panel_id", "PNL-B04-12"),
+                "location_block": primary.details.get(
+                    "location_block", "Bloque B - Fila 4 - Posicion 12"
+                ),
+                "technician_name": self.technician_name,
+                "technician_email": self.technician_email,
+                "supervisor_name": self.supervisor_name,
+                "resolution_note": "En atención de emergencia por técnico en turno",
+            }
+            hist_df = self.sheets_manager.upsert_incident_record(active_record)
+            self.incident_history = hist_df.to_dict("records")
         else:
             # Update alert metrics in place without sending duplicate email
             self.active_alerts = actionable
@@ -161,6 +187,7 @@ class IncidentManager:
     ) -> dict:
         """Restore Google Sheets telemetry to nominal values and close the active incident."""
         inc_id = self.active_incident_id or "INC-MANUAL"
+        created_at = self.active_created_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         primary = self.active_alerts[0] if self.active_alerts else None
         panel_id = (
             primary.details.get("panel_id", "PNL-B04-12") if primary else "PNL-B04-12"
@@ -175,19 +202,23 @@ class IncidentManager:
 
         record = {
             "incident_id": inc_id,
+            "status": "RESUELTO",
+            "created_at": created_at,
+            "resolved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "panel_id": panel_id,
             "location_block": location_block,
             "technician_name": self.technician_name,
             "technician_email": self.technician_email,
             "supervisor_name": self.supervisor_name,
-            "resolved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "resolved_by": resolved_by,
             "resolution_note": resolution_note,
         }
-        self.incident_history.insert(0, record)
+        hist_df = self.sheets_manager.upsert_incident_record(record)
+        self.incident_history = hist_df.to_dict("records")
 
         self.state = TechnicianState.RESOLVED
         self.active_incident_id = None
+        self.active_created_at = None
         self.active_alerts = []
         return self._snapshot()
 

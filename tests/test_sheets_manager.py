@@ -9,7 +9,7 @@ from src.sheets_manager import GoogleSheetsManager
 
 def test_sheets_manager_local_lifecycle_inject_and_restore(tmp_path):
     csv_path = tmp_path / "live_telemetry.csv"
-    mgr = GoogleSheetsManager(local_csv_path=csv_path)
+    mgr = GoogleSheetsManager(local_csv_path=csv_path, history_csv_path=tmp_path / "hist.csv")
     df_initial = mgr.fetch_telemetry()
     assert not df_initial.empty
     assert (df_initial["status_code"] == "0x00").all()
@@ -40,3 +40,54 @@ def test_extract_sheet_id_from_url():
         GoogleSheetsManager.extract_sheet_id(url)
         == "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
     )
+
+
+def test_incident_history_upsert_and_persistence(tmp_path):
+    csv_path = tmp_path / "live_telemetry.csv"
+    history_path = tmp_path / "incident_history.csv"
+    mgr = GoogleSheetsManager(local_csv_path=csv_path, history_csv_path=history_path)
+
+    hist_empty = mgr.fetch_incident_history()
+    assert hist_empty.empty
+    assert "incident_id" in hist_empty.columns
+    assert "status" in hist_empty.columns
+
+    # 1. Register active incident
+    mgr.upsert_incident_record(
+        {
+            "incident_id": "INC-20261109-01",
+            "status": "EN EMERGENCIA ASIGNADA",
+            "created_at": "2026-11-09 10:00:00",
+            "resolved_at": "Pendiente",
+            "panel_id": "PNL-B04-12",
+            "location_block": "Bloque B - Fila 4 - Posicion 12",
+            "technician_name": "Laura Reclutadora",
+            "technician_email": "laura@empresa.com",
+            "supervisor_name": "Ing. Miguel Ángel Mejía Sánchez",
+            "resolution_note": "En atención de campo",
+        }
+    )
+    hist_active = mgr.fetch_incident_history()
+    assert len(hist_active) == 1
+    assert hist_active.iloc[0]["incident_id"] == "INC-20261109-01"
+    assert hist_active.iloc[0]["status"] == "EN EMERGENCIA ASIGNADA"
+
+    # 2. Update same incident when resolved (no duplicate rows)
+    mgr.upsert_incident_record(
+        {
+            "incident_id": "INC-20261109-01",
+            "status": "RESUELTO",
+            "created_at": "2026-11-09 10:00:00",
+            "resolved_at": "2026-11-09 10:15:00",
+            "panel_id": "PNL-B04-12",
+            "location_block": "Bloque B - Fila 4 - Posicion 12",
+            "technician_name": "Laura Reclutadora",
+            "technician_email": "laura@empresa.com",
+            "supervisor_name": "Ing. Miguel Ángel Mejía Sánchez",
+            "resolution_note": "Conector MC4 reemplazado",
+        }
+    )
+    hist_resolved = mgr.fetch_incident_history()
+    assert len(hist_resolved) == 1
+    assert hist_resolved.iloc[0]["status"] == "RESUELTO"
+    assert hist_resolved.iloc[0]["resolution_note"] == "Conector MC4 reemplazado"

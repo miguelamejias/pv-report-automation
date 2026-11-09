@@ -23,7 +23,8 @@ def test_parse_reply_body_strips_quoted_lines():
 
 def test_full_closed_loop_incident_lifecycle_no_duplicate_emails(tmp_path):
     csv_path = tmp_path / "live_telemetry.csv"
-    sheets = GoogleSheetsManager(local_csv_path=csv_path)
+    hist_path = tmp_path / "incident_history.csv"
+    sheets = GoogleSheetsManager(local_csv_path=csv_path, history_csv_path=hist_path)
     transformer = SolarDataTransformer()
     manager = IncidentManager(sheets_manager=sheets, output_dir=tmp_path)
 
@@ -35,7 +36,7 @@ def test_full_closed_loop_incident_lifecycle_no_duplicate_emails(tmp_path):
     status_1 = manager.evaluate_telemetry(df_clean)
     assert status_1["state"] == TechnicianState.AVAILABLE
 
-    # 2. Sabotage telemetry -> transitions to EMERGENCY_ASSIGNED and sends 1 email
+    # 2. Sabotage telemetry -> transitions to EMERGENCY_ASSIGNED, sends 1 email, and registers in history as EN EMERGENCIA ASIGNADA
     sheets.inject_fault(
         panel_id="PNL-B04-12",
         v_dc_string_2=165.0,
@@ -48,17 +49,29 @@ def test_full_closed_loop_incident_lifecycle_no_duplicate_emails(tmp_path):
     assert status_2["email_dispatched_count"] == 1
     incident_id = status_2["incident_id"]
 
-    # 3. Re-evaluating same fault on Streamlit refresh does NOT send duplicate email
+    hist_df_active = sheets.fetch_incident_history()
+    assert len(hist_df_active) == 1
+    assert hist_df_active.iloc[0]["incident_id"] == incident_id
+    assert hist_df_active.iloc[0]["status"] == "EN EMERGENCIA ASIGNADA"
+
+    # 3. Re-evaluating same fault on Streamlit refresh does NOT send duplicate email or duplicate history row
     status_3 = manager.evaluate_telemetry(df_fault)
     assert status_3["incident_id"] == incident_id
     assert status_3["email_dispatched_count"] == 1
+    assert len(sheets.fetch_incident_history()) == 1
 
-    # 4. Technician replies to email -> restores sheet and normalizes platform
+    # 4. Technician replies to email -> restores sheet, updates history status to RESUELTO, and normalizes platform
     resolution = manager.process_resolution(
         resolution_note="Conector MC4 reemplazado y coordinado con supervisor.",
         resolved_by="email_reply",
     )
     assert resolution["state"] == TechnicianState.RESOLVED
+    hist_df_resolved = sheets.fetch_incident_history()
+    assert len(hist_df_resolved) == 1
+    assert hist_df_resolved.iloc[0]["incident_id"] == incident_id
+    assert hist_df_resolved.iloc[0]["status"] == "RESUELTO"
+    assert "Conector MC4 reemplazado" in hist_df_resolved.iloc[0]["resolution_note"]
+
     df_after = transformer.transform_dataframe(sheets.fetch_telemetry())
     status_4 = manager.evaluate_telemetry(df_after)
     assert status_4["state"] == TechnicianState.AVAILABLE
@@ -71,7 +84,10 @@ def test_app_plant_map_figure_and_config_loader(tmp_path):
     assert "smtp_server" in cfg
     assert "imap_server" in cfg
 
-    sheets = GoogleSheetsManager(local_csv_path=tmp_path / "map_telemetry.csv")
+    sheets = GoogleSheetsManager(
+        local_csv_path=tmp_path / "map_telemetry.csv",
+        history_csv_path=tmp_path / "map_history.csv",
+    )
     sheets.inject_fault(panel_id="PNL-B04-12", v_dc_string_2=160.0, temp_heatsink=89.0, status_code="0x05")
     df = SolarDataTransformer().transform_dataframe(sheets.fetch_telemetry())
     fig = build_plant_layout_figure(df)
@@ -179,5 +195,3 @@ def test_imap_falls_back_to_all_when_unseen_empty(monkeypatch):
     reply = listener.check_for_resolution_reply("INC-2026-99", "laura@empresa.com")
     assert reply is not None
     assert reply["incident_id"] == "INC-2026-99"
-
-

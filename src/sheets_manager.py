@@ -4,8 +4,8 @@ GoogleSheetsManager — Bidirectional Google Sheets & Local Telemetry Sync
 ========================================================================
 
 Connects the Solar NOC platform to a shared Google Sheet in Google Drive
-(or local CSV mirror) containing real-time panel telemetry and physical
-location coordinates.
+(or local CSV mirror) containing real-time panel telemetry, physical
+location coordinates, and the persistent Incident History audit log.
 
 Capabilities:
   1. Read telemetry from a shared Google Sheets URL/ID (via CSV export URL
@@ -14,6 +14,8 @@ Capabilities:
      recruiter demonstrations.
   3. Automatically restore faulted rows back to nominal values when the
      on-duty technician replies to the incident alert email.
+  4. Record and update every incident's lifecycle state
+     (EN EMERGENCIA ASIGNADA -> RESUELTO) in the Incident History sheet/CSV.
 
 Author: Miguel Ángel Mejía Sánchez
 """
@@ -45,24 +47,44 @@ DEFAULT_PANELS = [
     ("PNL-C04-10", "Bloque C - Fila 4 - Posicion 10", 4.9197, -73.9970),
 ]
 
+HISTORY_COLUMNS = [
+    "incident_id",
+    "status",
+    "created_at",
+    "resolved_at",
+    "panel_id",
+    "location_block",
+    "technician_name",
+    "technician_email",
+    "supervisor_name",
+    "resolution_note",
+]
+
 
 class GoogleSheetsManager:
-    """Manages reading and restoring solar panel telemetry in Google Sheets & CSV."""
+    """Manages reading/restoring solar panel telemetry and incident history in Google Sheets & CSV."""
 
     def __init__(
         self,
         sheet_id_or_url: Optional[str] = None,
         local_csv_path: str | Path = "sample_data/live_telemetry.csv",
         credentials_path: Optional[str | Path] = None,
+        history_csv_path: str | Path = "sample_data/incident_history.csv",
     ) -> None:
         self.sheet_id = (
             self.extract_sheet_id(sheet_id_or_url) if sheet_id_or_url else ""
         )
         self.local_csv_path = Path(local_csv_path)
+        self.history_csv_path = Path(history_csv_path)
         self.credentials_path = Path(credentials_path) if credentials_path else None
         self.local_csv_path.parent.mkdir(parents=True, exist_ok=True)
+        self.history_csv_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.local_csv_path.exists():
             self._create_default_local_csv()
+        if not self.history_csv_path.exists():
+            pd.DataFrame(columns=HISTORY_COLUMNS).to_csv(
+                self.history_csv_path, index=False
+            )
 
     @staticmethod
     def extract_sheet_id(sheet_id_or_url: str) -> str:
@@ -148,6 +170,61 @@ class GoogleSheetsManager:
                 logger.warning("Could not write to Google Sheet via gspread: %s", exc)
         return df
 
+    def fetch_incident_history(self) -> pd.DataFrame:
+        """Fetch the persistent incident history log (local CSV + Google Sheets mirror)."""
+        if not self.history_csv_path.exists():
+            df = pd.DataFrame(columns=HISTORY_COLUMNS)
+            df.to_csv(self.history_csv_path, index=False)
+            return df
+        try:
+            df = pd.read_csv(self.history_csv_path)
+            for col in HISTORY_COLUMNS:
+                if col not in df.columns:
+                    df[col] = ""
+            return df[HISTORY_COLUMNS]
+        except Exception:
+            return pd.DataFrame(columns=HISTORY_COLUMNS)
+
+    def upsert_incident_record(self, record: dict) -> pd.DataFrame:
+        """Insert a new incident or update an existing incident's status in the history sheet."""
+        df = self.fetch_incident_history()
+        inc_id = str(record.get("incident_id", "")).strip()
+        normalized_row = {col: str(record.get(col, "")) for col in HISTORY_COLUMNS}
+
+        if not df.empty and inc_id in df["incident_id"].astype(str).values:
+            mask = df["incident_id"].astype(str) == inc_id
+            for col, val in normalized_row.items():
+                if val or col != "created_at":
+                    df.loc[mask, col] = val
+        else:
+            new_row_df = pd.DataFrame([normalized_row], columns=HISTORY_COLUMNS)
+            df = pd.concat([new_row_df, df], ignore_index=True)
+
+        df.to_csv(self.history_csv_path, index=False)
+
+        if self.sheet_id and self.credentials_path and self.credentials_path.exists():
+            try:
+                import gspread
+
+                gc = gspread.service_account(filename=str(self.credentials_path))
+                sh = gc.open_by_key(self.sheet_id)
+                try:
+                    ws_hist = sh.worksheet("Historial_Incidentes")
+                except Exception:
+                    ws_hist = sh.add_worksheet(
+                        title="Historial_Incidentes", rows=200, cols=len(HISTORY_COLUMNS)
+                    )
+                ws_hist.clear()
+                ws_hist.update([df.columns.values.tolist()] + df.fillna("").values.tolist())
+                logger.info(
+                    "Synced %d incident history rows to Google Sheet tab Historial_Incidentes",
+                    len(df),
+                )
+            except Exception as exc:
+                logger.warning("Could not sync incident history to Google Sheet: %s", exc)
+
+        return df
+
     def inject_fault(
         self,
         panel_id: str = "PNL-B04-12",
@@ -189,5 +266,4 @@ class GoogleSheetsManager:
                 df.loc[idx, "p_ac_output"] = 4980.0
                 df.loc[idx, "status_code"] = "0x00"
 
-        logger.info("Restored nominal telemetry values across all panels.")
         return self.save_telemetry(df)
