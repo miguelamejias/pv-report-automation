@@ -24,6 +24,12 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src import __version__
+import src.incident_manager as _inc_mod
+import src.sheets_manager as _sheets_mod
+
+importlib.reload(_sheets_mod)
+importlib.reload(_inc_mod)
+
 from src.imap_listener import IMAPConfig, IMAPListener
 from src.incident_manager import IncidentManager, TechnicianState
 from src.notifications import EmailConfig, NotificationOrchestrator
@@ -195,12 +201,19 @@ def init_session_state() -> None:
             if latest_cfg.get(key) and not st.session_state.cfg.get(key):
                 st.session_state.cfg[key] = latest_cfg[key]
 
-    if "sheets_manager" not in st.session_state:
+    if (
+        "sheets_manager" not in st.session_state
+        or not hasattr(st.session_state.sheets_manager, "fetch_incident_history")
+    ):
         st.session_state.sheets_manager = GoogleSheetsManager(
             sheet_id_or_url=st.session_state.cfg["google_sheet_url"],
             local_csv_path="sample_data/live_telemetry.csv",
             credentials_path=st.session_state.cfg["service_account_json"] or None,
             history_csv_path="sample_data/incident_history.csv",
+        )
+        st.session_state.incident_manager = IncidentManager(
+            sheets_manager=st.session_state.sheets_manager,
+            output_dir="output",
         )
 
     if "incident_manager" not in st.session_state:
